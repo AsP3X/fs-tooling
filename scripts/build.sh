@@ -10,13 +10,21 @@ python3 - "$ROOT" <<'PY'
 from pathlib import Path
 import sys, base64, gzip
 root = Path(sys.argv[1])
-blob = (root / "script/freshservice-mod-dialog.js.gz.b64").read_text().strip()
-src = gzip.decompress(base64.b64decode(blob))
-(root / "script/freshservice-mod-dialog.js").write_bytes(src)
+plain = root / "script/freshservice-mod-dialog.js"
+packed = root / "script/freshservice-mod-dialog.js.gz.b64"
+if plain.exists() and plain.stat().st_size > 1000:
+    src = plain.read_bytes()
+elif packed.exists():
+    src = gzip.decompress(base64.b64decode(packed.read_text().strip()))
+    plain.write_bytes(src)
+else:
+    raise SystemExit("missing script/freshservice-mod-dialog.js")
 text = src.decode()
 if "// ==/UserScript==" in text:
-    text = text.split("// ==/UserScript==", 1)[-1].lstrip("\n")
-(root / "extension/content.js").write_text(text)
+    body = text.split("// ==/UserScript==", 1)[-1].lstrip("\n")
+else:
+    body = text
+(root / "extension/content.js").write_text(body)
 PY
 
 cp "$ROOT/extension/manifest.json" "$EXT/"

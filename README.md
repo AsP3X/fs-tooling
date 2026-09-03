@@ -4,7 +4,7 @@ Highlight stale tickets, filter by status, open them in tabs, and view idle/cycl
 
 ## Downloads
 
-Every push to `master` publishes a GitHub Release:
+Every push to `master` that includes `script/freshservice-mod-dialog.js` publishes a GitHub Release:
 
 - [Latest release](https://github.com/AsP3X/fs-tooling/releases/latest)
 - `sth-extension.zip` — Chrome / Edge unpacked extension
@@ -19,15 +19,19 @@ Every push to `master` publishes a GitHub Release:
 4. **Load unpacked** and select the unpacked folder (`manifest.json` at the top).
 5. Open `/a/tickets`.
 
-## Bare script
+## Add the script (once)
 
-Paste `freshservice-mod-dialog.js` into the DevTools console or a Tampermonkey userscript. Settings stay in `localStorage` (`sth-settings`, `sth-history`).
+The injectable source is ~38KB. Add it locally so GitHub Actions can package releases:
 
-## Repo layout
-
+```bash
+git clone https://github.com/AsP3X/fs-tooling.git
+cd fs-tooling
+# copy freshservice-mod-dialog.js into script/
+mkdir -p script extension
+cp /path/to/freshservice-mod-dialog.js script/
+git add script/freshservice-mod-dialog.js
+git commit -m "Add injectable source"
+git push origin master
 ```
-script/freshservice-mod-dialog.js   injectable source
-extension/                         MV3 content-script package
-scripts/build.sh                   local packager
-.github/workflows/release.yml      zip + tar.gz + release assets
-```
+
+The workflow on `master` then builds zip + tar.gz + the bare script and attaches them to a release tagged `v1.5.<run>`.
