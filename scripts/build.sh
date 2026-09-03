@@ -8,23 +8,26 @@ mkdir -p "$EXT" "$ROOT/script" "$ROOT/extension"
 
 python3 - "$ROOT" <<'PY'
 from pathlib import Path
-import sys, base64, gzip
+import sys, base64
 root = Path(sys.argv[1])
 plain = root / "script/freshservice-mod-dialog.js"
-packed = root / "script/freshservice-mod-dialog.js.gz.b64"
-if plain.exists() and plain.stat().st_size > 1000:
-    src = plain.read_bytes()
-elif packed.exists():
-    src = gzip.decompress(base64.b64decode(packed.read_text().strip()))
+payload = sorted((root / "script/payload").glob("*.b64")) if (root / "script/payload").exists() else []
+if payload:
+    blob = "".join(p.read_text() for p in payload)
+    blob = "".join(blob.split())
+    src = base64.urlsafe_b64decode(blob)
     plain.write_bytes(src)
+elif plain.exists() and plain.stat().st_size > 1000:
+    src = plain.read_bytes()
 else:
-    raise SystemExit("missing script/freshservice-mod-dialog.js")
+    raise SystemExit("missing script/payload/*.b64 or script/freshservice-mod-dialog.js")
 text = src.decode()
 if "// ==/UserScript==" in text:
     body = text.split("// ==/UserScript==", 1)[-1].lstrip("\n")
 else:
     body = text
 (root / "extension/content.js").write_text(body)
+print("decoded script", len(src), "bytes")
 PY
 
 cp "$ROOT/extension/manifest.json" "$EXT/"
