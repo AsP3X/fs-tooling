@@ -1,6 +1,6 @@
 # Freshservice tooling
 
-Highlight stale tickets, filter by status, open them in tabs, and view idle/cycle statistics on Freshservice ticket lists.
+Highlight stale tickets, filter by status (AND/OR), save views, open marked tickets in tabs, and view idle/cycle statistics on Freshservice ticket lists.
 
 ## Downloads
 
@@ -19,19 +19,9 @@ Every push to `master` that includes `script/freshservice-mod-dialog.js` publish
 4. **Load unpacked** and select the unpacked folder (`manifest.json` at the top).
 5. Open `/a/tickets`.
 
-## Add the script (once)
+## Views and match mode (1.6.0)
 
-The injectable source is ~38KB. Add it locally so GitHub Actions can package releases:
-
-```bash
-git clone https://github.com/AsP3X/fs-tooling.git
-cd fs-tooling
-# copy freshservice-mod-dialog.js into script/
-mkdir -p script extension
-cp /path/to/freshservice-mod-dialog.js script/
-git add script/freshservice-mod-dialog.js
-git commit -m "Add injectable source"
-git push origin master
-```
-
-The workflow on `master` then builds zip + tar.gz + the bare script and attaches them to a release tagged `v1.5.<run>`.
+- **All** — mark only if idle **and** (optional) status is listed
+- **Any** — mark if idle **or** status is listed
+- Built-in views: Idle 6d, Open + idle, Pending 3d, 3rd party
+- **Save view** stores the current days + statuses + match mode
