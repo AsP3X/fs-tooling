@@ -4,7 +4,7 @@ Ops panel for Freshservice ticket lists and Employee Onboarding / Journeys.
 
 - Compact floating panel: settings sections are collapsed by default
 - Tickets: idle highlighting from **Updated**, status tags, AND/OR, saved views
-- Journeys: injected **Start date** column parsed from the title (`Start 14-09-2026`); click the header to sort; **Filter** or right-click the column for a from–to date range that hides other rows (also in the ops panel)
+- Journeys: injected **Start date** column parsed from the title (`Start 14-09-2026`); click the header to sort; **Filter** or right-click the column for a from–to date range. The list is rebuilt to only those rows and pagination is dropped when they fit on one view (also in the ops panel)
 - Sort the visible list by Created On, Initiator, Request Status, or child progress
 - Statistics snapshots do **not** store person names
 
@@ -17,4 +17,4 @@ Every push to `master` that includes `script/freshservice-mod-dialog.js` publish
 - `sth-extension.tar.gz` — same folder as a tarball
 - `freshservice-mod-dialog.js` — bare injectable / Tampermonkey script
 
-Current source version: **2.2.0**.
+Current source version: **2.3.1**.

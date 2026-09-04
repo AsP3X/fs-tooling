@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      2.2.0
+// @version      2.3.1
 // @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
@@ -17,6 +17,11 @@
   const CELL_MARK = `${NS}-cell`;
   const HIDE_MARK = `${NS}-hide`;
   const RANGE_POP_ID = `${NS}-range-pop`;
+  const RANGE_TABLE_ID = `${NS}-static-table`;
+  const RANGE_BANNER_ID = `${NS}-range-banner`;
+  const HIDE_ATTR = `data-${NS}-hidden`;
+  const SRC_ATTR = `data-${NS}-src`;
+  const MAX_HARVEST_PAGES = 40;
   const STORAGE_KEY = `${NS}-settings-v2`;
   const HISTORY_KEY = `${NS}-history-v2`;
   const MS_DAY = 86400000;
@@ -288,6 +293,21 @@
       }
       td[data-sth-col="start"] .sth-empty { opacity: .35; }
       tr.${HIDE_MARK} { display: none !important; }
+      [${HIDE_ATTR}="1"] { display: none !important; }
+      #${RANGE_TABLE_ID} {
+        width: 100%;
+        border-collapse: separate;
+        background: inherit;
+      }
+      #${RANGE_BANNER_ID} {
+        margin: 8px 0;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font: 600 12px Inter, ui-sans-serif, system-ui, sans-serif;
+        color: ${c};
+        background: ${hexToRgba(c, 0.12)};
+        border: 1px solid ${hexToRgba(c, 0.35)};
+      }
       th[data-sth-col="start"].sth-filtered { color: ${c}; }
       th[data-sth-col="start"] .sth-range-badge {
         display: block;
@@ -402,14 +422,22 @@
     document.querySelectorAll('[data-sth-col="start"]').forEach((el) => el.remove());
   }
 
+  function visibleJourneyTable() {
+    return document.getElementById(RANGE_TABLE_ID)
+      || document.querySelector(`table[${SRC_ATTR}="1"]`)
+      || document.querySelector('thead th[data-name="subject"]')?.closest('table')
+      || document;
+  }
+
   function injectStartColumn(items) {
     if (moduleId !== 'journeys') {
       removeStartColumn();
       return;
     }
-    const subjectTh = document.querySelector('thead th[data-name="subject"]');
+    const table = visibleJourneyTable();
+    const subjectTh = table.querySelector?.('thead th[data-name="subject"]') || document.querySelector('thead th[data-name="subject"]');
     if (!subjectTh) return;
-    let th = document.querySelector('thead th[data-sth-col="start"]');
+    let th = table.querySelector?.('thead th[data-sth-col="start"]') || subjectTh.parentElement.querySelector('th[data-sth-col="start"]');
     if (!th) {
       th = document.createElement('th');
       th.dataset.sthCol = 'start';
@@ -496,11 +524,13 @@
     return row.closest('tbody');
   }
 
-  function collectRows() {
+  function collectRows(root) {
     const now = Date.now();
     const out = [];
-    document.querySelectorAll('tr.et-tr').forEach((row, idx) => {
+    const scope = root || document.getElementById(RANGE_TABLE_ID) || document;
+    scope.querySelectorAll('tr.et-tr').forEach((row, idx) => {
       if (row.closest('thead')) return;
+      if (row.classList.contains(HIDE_MARK)) return;
       if (!row.dataset.sthOrd) row.dataset.sthOrd = String(idx);
       const updatedEl = row.querySelector('td[data-name="updated_at_date"] [data-test-id="date-cell"]');
       const createdEl = row.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
@@ -572,14 +602,456 @@
     return match;
   }
 
-  function applyRowVisibility(items) {
-    const hideOffRange = moduleId === 'journeys' && rangeActive();
-    items.forEach((item) => {
-      item.row.classList.toggle(HIDE_MARK, hideOffRange && !startInRange(item));
+  const ONBOARD_STATUS = {
+    1: 'Awaiting Information',
+    2: 'Cancelled',
+    3: 'Being Processed',
+    4: 'Closed'
+  };
+
+  let rangeToken = 0;
+  let rangeBusy = false;
+  let rangeComplete = false;
+  let rangeViewKey = '';
+  let rangeScanned = 0;
+  let didWalkPages = false;
+  let lastStats = { tickets: 0, marked: 0, hidden: 0 };
+  let livePageId = '';
+  let livePageHrefs = new Set();
+  let liveFingerprint = '';
+  let pendingPageChange = false;
+
+  function rangeKey() {
+    return `${page().startFrom || ''}|${page().startTo || ''}`;
+  }
+
+  function sourceTable() {
+    return document.querySelector(`table[${SRC_ATTR}="1"]`)
+      || document.querySelector('thead th[data-name="subject"]')?.closest('table');
+  }
+
+  function rowHrefOf(row) {
+    return ticketHref(row) || '';
+  }
+
+  function sanitizeClone(tr) {
+    tr.removeAttribute('id');
+    tr.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    tr.classList.remove(HIDE_MARK, ROW_MARK);
+    tr.removeAttribute('data-stale-days');
+    return tr;
+  }
+
+  function waitFor(pred, timeout = 8000) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (pred()) return resolve(true);
+        if (Date.now() - t0 > timeout) return resolve(false);
+        setTimeout(tick, 120);
+      };
+      tick();
     });
-    if (moduleId !== 'journeys') {
-      document.querySelectorAll(`tr.${HIDE_MARK}`).forEach((el) => el.classList.remove(HIDE_MARK));
+  }
+
+  function pageCountInfo() {
+    const re = /(\d+)\s*[–-]\s*(\d+)\s+of\s+(\d+)/i;
+    const nodes = document.querySelectorAll('span, div, p, label');
+    for (const el of nodes) {
+      if (el.children.length) continue;
+      const raw = el.dataset.sthCountOrig || el.textContent || '';
+      const m = String(raw).match(re);
+      if (m) return { from: +m[1], to: +m[2], total: +m[3], el };
     }
+    return null;
+  }
+
+  function liveJourneyTable() {
+    const staticTbl = document.getElementById(RANGE_TABLE_ID);
+    const src = document.querySelector(`table[${SRC_ATTR}="1"]`)
+      || document.querySelector('thead th[data-name="subject"]')?.closest('table');
+    if (!src || src === staticTbl) return null;
+    return src;
+  }
+
+  function currentPageId() {
+    const info = pageCountInfo();
+    const pager = info ? `${info.from}-${info.to}/${info.total}` : '';
+    return `${location.pathname}${location.search}|${pager}`;
+  }
+
+  function dropStaleLiveRows() {
+    const table = liveJourneyTable() || (
+      document.getElementById(RANGE_TABLE_ID)
+        ? null
+        : document.querySelector('thead th[data-name="subject"]')?.closest('table')
+    );
+    if (!table || table.id === RANGE_TABLE_ID) return;
+    const fp = fingerprint(table);
+    if (pendingPageChange && liveFingerprint && fp === liveFingerprint) return;
+    const id = currentPageId();
+    const rows = [...table.querySelectorAll('tbody tr.et-tr')];
+    const pageChanged = pendingPageChange || (livePageId && id !== livePageId);
+    if (pageChanged && livePageHrefs.size) {
+      rows.forEach((row) => {
+        const href = ticketHref(row);
+        if (href && livePageHrefs.has(href)) row.remove();
+      });
+      table.querySelectorAll('tbody tr.et-tr').forEach((row) => {
+        delete row.dataset.sthOrd;
+      });
+      pendingPageChange = false;
+    }
+    const kept = [...table.querySelectorAll('tbody tr.et-tr')];
+    livePageId = id;
+    livePageHrefs = new Set(kept.map(ticketHref).filter(Boolean));
+    liveFingerprint = fingerprint(table);
+  }
+
+  function rewriteCountLabels(shown) {
+    const re = /^\s*\d+\s*[–-]\s*\d+\s+of\s+\d+\s*$/;
+    document.querySelectorAll('span, div, p, label').forEach((el) => {
+      if (el.children.length) return;
+      if (!re.test(el.textContent || '')) return;
+      if (el.dataset.sthCountOrig == null) el.dataset.sthCountOrig = el.textContent;
+      el.textContent = shown ? `1–${shown} of ${shown}` : '0 of 0';
+    });
+  }
+
+  function restoreCountLabels() {
+    document.querySelectorAll('[data-sth-count-orig]').forEach((el) => {
+      el.textContent = el.dataset.sthCountOrig;
+      delete el.dataset.sthCountOrig;
+    });
+  }
+
+  function pagerRoots() {
+    const roots = new Set();
+    document.querySelectorAll('.pagination, [data-test-id="pagination"], .pagination-container, .list-pagination, nav[aria-label*="agination" i]').forEach((el) => roots.add(el));
+    const next = document.querySelector('[aria-label="Next"], [aria-label="Next page"], [rel="next"], [data-test-id="next-page"]');
+    if (next) roots.add(next.closest('nav, .pagination, [class*="pag"]') || next.parentElement);
+    return [...roots].filter((el) => el && !el.closest?.(`#${HOST_ID}`) && el.id !== RANGE_BANNER_ID);
+  }
+
+  function nextPageButton() {
+    const el = document.querySelector('[aria-label="Next page"], [aria-label="Next"], [rel="next"], [data-test-id="next-page"], .pagination .next, .pagination [class*="next"]');
+    if (!el || el.closest?.(`#${HOST_ID}`)) return null;
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true' || el.classList.contains('disabled')) return null;
+    return el;
+  }
+
+  function firstPageButton() {
+    return document.querySelector('[aria-label="First page"], [aria-label="First"], .pagination .first, [data-test-id="first-page"]');
+  }
+
+  function hasNextPage() {
+    const info = pageCountInfo();
+    if (info && info.to >= info.total) return false;
+    return !!nextPageButton();
+  }
+
+  function setHiddenFlag(el, on) {
+    if (!el) return;
+    if (on) el.setAttribute(HIDE_ATTR, '1');
+    else el.removeAttribute(HIDE_ATTR);
+  }
+
+  function hideSourceChrome(on) {
+    const src = sourceTable();
+    if (src) {
+      src.setAttribute(SRC_ATTR, '1');
+      setHiddenFlag(src, on);
+    }
+    pagerRoots().forEach((el) => setHiddenFlag(el, on));
+    document.querySelectorAll('occluded-content').forEach((el) => setHiddenFlag(el, on));
+  }
+
+  function setRangeBanner(text) {
+    let el = document.getElementById(RANGE_BANNER_ID);
+    if (!text) {
+      el?.remove();
+      return;
+    }
+    const src = sourceTable();
+    if (!el) {
+      el = document.createElement('div');
+      el.id = RANGE_BANNER_ID;
+      (src?.parentNode || document.body).insertBefore(el, src || null);
+    }
+    el.textContent = text;
+  }
+
+  function mountStaticRows(rowEls) {
+    const src = sourceTable();
+    if (!src) return null;
+    let table = document.getElementById(RANGE_TABLE_ID);
+    if (!table) {
+      table = src.cloneNode(false);
+      table.id = RANGE_TABLE_ID;
+      table.removeAttribute(HIDE_ATTR);
+      table.removeAttribute(SRC_ATTR);
+      const thead = src.querySelector('thead');
+      if (thead) table.appendChild(thead.cloneNode(true));
+      table.appendChild(document.createElement('tbody'));
+      src.parentNode.insertBefore(table, src);
+    }
+    const tbody = table.tBodies[0] || table.appendChild(document.createElement('tbody'));
+    tbody.replaceChildren();
+    rowEls.forEach((row, i) => {
+      const tr = row.cloneNode(true);
+      sanitizeClone(tr);
+      tr.dataset.sthOrd = String(i);
+      tbody.appendChild(tr);
+    });
+    hideSourceChrome(true);
+    rewriteCountLabels(rowEls.length);
+    return table;
+  }
+
+  function teardownRangeView() {
+    const hadView = !!(document.getElementById(RANGE_TABLE_ID) || rangeViewKey);
+    if (!hadView && !didWalkPages) return;
+    rangeToken += 1;
+    rangeBusy = false;
+    rangeComplete = false;
+    rangeViewKey = '';
+    rangeScanned = 0;
+    document.getElementById(RANGE_TABLE_ID)?.remove();
+    setRangeBanner('');
+    restoreCountLabels();
+    hideSourceChrome(false);
+    document.querySelectorAll(`[${HIDE_ATTR}="1"]`).forEach((el) => el.removeAttribute(HIDE_ATTR));
+    document.querySelectorAll(`tr.${HIDE_MARK}`).forEach((el) => el.classList.remove(HIDE_MARK));
+    if (didWalkPages) {
+      didWalkPages = false;
+      pendingPageChange = true;
+      firstPageButton()?.click();
+    }
+  }
+
+  function recordSubject(rec) {
+    return rec.subject || rec.title || rec.ticket_subject || rec.name || rec.attributes?.subject || '';
+  }
+
+  function recordStartKey(rec) {
+    const subject = recordSubject(rec);
+    let key = dateKey(parseStartDate(subject));
+    if (key) return key;
+    const fields = rec.fields || rec.custom_fields || rec.attributes || {};
+    for (const k of Object.keys(fields)) {
+      if (!/join|start|date/i.test(k)) continue;
+      key = parseStartInput(fields[k]) || dateKey(parseTicketDate(String(fields[k] || '')));
+      if (key) return key;
+    }
+    return parseStartInput(rec.start_date || rec.date_of_joining || rec.joining_date);
+  }
+
+  function recordInRange(rec) {
+    return startInRange({ startKey: recordStartKey(rec) });
+  }
+
+  function recordHref(rec) {
+    if (rec.ticket_id) return new URL(`/a/tickets/${rec.ticket_id}`, location.origin).href;
+    if (rec.id && /onboarding/i.test(location.pathname)) return new URL(`/a/employee_onboarding/${rec.id}`, location.origin).href;
+    return '';
+  }
+
+  function fillRowFromRecord(tr, rec) {
+    const subject = recordSubject(rec);
+    const href = recordHref(rec);
+    const a = tr.querySelector('a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"], a[href*="/journeys/"]');
+    if (a) {
+      const label = sanitizeTitle(subject) || subject;
+      a.textContent = label;
+      a.setAttribute('title', subject || label);
+      if (href) a.setAttribute('href', href);
+    }
+    const titleHolders = tr.querySelectorAll('td[data-name="subject"] [title], td[data-name="ticket_subject"] [title]');
+    titleHolders.forEach((el) => el.setAttribute('title', subject));
+    const statusName = ONBOARD_STATUS[rec.status] || rec.status_name || rec.request_status || (typeof rec.status === 'string' ? rec.status : '');
+    if (statusName) {
+      const badge = tr.querySelector('[data-test-id="state-cell"] span, .status-result, td[data-name="status"] [title], td[data-name="status"]');
+      if (badge) {
+        badge.textContent = statusName;
+        if (badge.hasAttribute('title')) badge.setAttribute('title', statusName);
+      }
+    }
+    const created = rec.created_at ? prettyStart(new Date(rec.created_at)) : '';
+    if (created) {
+      const cell = tr.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
+      if (cell) {
+        cell.textContent = created;
+        cell.setAttribute('title', created);
+      }
+    }
+    const initiator = rec.initiator_name || rec.requester_name || rec.actors && Object.values(rec.actors)[0]?.name || '';
+    if (initiator) {
+      const cell = tr.querySelector('.requester-cell-name, td[data-name="initiator"] a, td[data-name="initiator"]');
+      if (cell) cell.textContent = initiator;
+    }
+    return tr;
+  }
+
+  function extractList(data) {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (typeof data !== 'object') return [];
+    for (const k of ['onboarding_requests', 'journey_requests', 'tickets', 'requests', 'items', 'records']) {
+      if (Array.isArray(data[k])) return data[k];
+    }
+    if (Array.isArray(data.data)) {
+      return data.data.map((x) => (x && x.attributes ? { id: x.id, ...x.attributes } : x));
+    }
+    return [];
+  }
+
+  function listUrlCandidates() {
+    const out = [];
+    for (const e of performance.getEntriesByType('resource')) {
+      const n = e.name;
+      if (!/onboarding_requests|journeys\/requests/i.test(n)) continue;
+      if (/\/form\b|\/configs\b/.test(n)) continue;
+      try {
+        const u = new URL(n, location.origin);
+        u.searchParams.delete('page');
+        u.searchParams.delete('per_page');
+        out.push(u.toString());
+      } catch { /* ignore */ }
+    }
+    return [...new Set(out)];
+  }
+
+  async function fetchJson(url) {
+    const headers = { Accept: 'application/json' };
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+    const res = await fetch(url, { credentials: 'include', headers });
+    if (!res.ok) throw new Error(String(res.status));
+    const ct = res.headers.get('content-type') || '';
+    if (!/json/i.test(ct)) throw new Error('not-json');
+    return res.json();
+  }
+
+  async function fetchAllPages(base) {
+    const out = [];
+    const origin = new URL(base, location.origin);
+    for (let p = 1; p <= MAX_HARVEST_PAGES; p++) {
+      origin.searchParams.set('page', String(p));
+      origin.searchParams.set('per_page', '100');
+      const data = await fetchJson(origin.toString());
+      const list = extractList(data);
+      if (!list.length) break;
+      out.push(...list);
+      if (list.length < 100) break;
+    }
+    return out;
+  }
+
+  async function harvestByApi(token, template) {
+    if (!template) return null;
+    const urls = listUrlCandidates();
+    for (const base of urls) {
+      if (token !== rangeToken) return null;
+      try {
+        const records = await fetchAllPages(base);
+        if (!records.length) continue;
+        const rows = records.filter(recordInRange).map((rec) => sanitizeClone(fillRowFromRecord(template.cloneNode(true), rec)));
+        return { rows, scanned: records.length, complete: true };
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function fingerprint(root) {
+    return [...(root || document).querySelectorAll('tr.et-tr a[href]')].map((a) => a.getAttribute('href')).join('|');
+  }
+
+  async function harvestByPager(token, map) {
+    const src = () => document.querySelector(`table[${SRC_ATTR}="1"]`) || sourceTable();
+    let scanned = collectRows(src() || document).length;
+    let pages = 1;
+    while (pages < MAX_HARVEST_PAGES) {
+      if (token !== rangeToken) return { scanned, complete: false };
+      const btn = nextPageButton();
+      if (!btn) break;
+      const before = fingerprint(src());
+      pendingPageChange = true;
+      btn.click();
+      didWalkPages = true;
+      const moved = await waitFor(() => fingerprint(src()) !== before, 10000);
+      if (!moved) break;
+      dropStaleLiveRows();
+      pages += 1;
+      const items = collectRows(src() || document);
+      scanned += items.length;
+      items.filter(startInRange).forEach((item) => {
+        const k = item.href || `${item.startKey}|${item.label}`;
+        if (!map.has(k)) map.set(k, sanitizeClone(item.row.cloneNode(true)));
+      });
+      setRangeBanner(`Scanning page ${pages}… ${map.size} in range so far`);
+    }
+    const complete = !nextPageButton();
+    const first = firstPageButton();
+    if (didWalkPages && first && !first.disabled && first.getAttribute('aria-disabled') !== 'true') {
+      const before = fingerprint(src());
+      pendingPageChange = true;
+      first.click();
+      await waitFor(() => fingerprint(src()) !== before, 8000);
+      dropStaleLiveRows();
+    }
+    return { scanned, complete };
+  }
+
+  function bannerText(shown, scanned, complete) {
+    const range = formatRangeLabel(page().startFrom, page().startTo);
+    if (!shown) return `No requests with start date ${range}.`;
+    if (complete) return `Showing ${shown} request${shown === 1 ? '' : 's'} with start date ${range}. Pagination off.`;
+    return `Showing ${shown} in range on scanned pages (${scanned} scanned).`;
+  }
+
+  async function harvestAndFill(initialItems) {
+    if (rangeBusy) return;
+    rangeBusy = true;
+    const token = ++rangeToken;
+    const map = new Map();
+    initialItems.filter(startInRange).forEach((item) => {
+      const k = item.href || `${item.startKey}|${item.label}`;
+      map.set(k, sanitizeClone(item.row.cloneNode(true)));
+    });
+    setRangeBanner(`Loading start dates ${formatRangeLabel(page().startFrom, page().startTo)}…`);
+    let scanned = initialItems.length;
+    let complete = !hasNextPage();
+    try {
+      const template = initialItems[0]?.row || sourceTable()?.querySelector('tr.et-tr');
+      const api = await harvestByApi(token, template);
+      if (api) {
+        scanned = Math.max(scanned, api.scanned);
+        api.rows.forEach((row) => {
+          const k = rowHrefOf(row) || row.textContent.replace(/\s+/g, ' ').trim().slice(0, 120);
+          if (k && !map.has(k)) map.set(k, row);
+        });
+        complete = api.complete;
+      }
+      if (!complete && hasNextPage()) {
+        const walked = await harvestByPager(token, map);
+        scanned = Math.max(scanned, walked.scanned);
+        complete = walked.complete;
+      }
+    } catch {
+      complete = false;
+    }
+    if (token !== rangeToken) {
+      rangeBusy = false;
+      return;
+    }
+    rangeComplete = complete;
+    rangeScanned = scanned;
+    mountStaticRows([...map.values()]);
+    setRangeBanner(bannerText(map.size, scanned, complete));
+    rangeBusy = false;
+    paintList();
   }
 
   function listedRows() {
@@ -596,15 +1068,10 @@
     document.querySelectorAll(`.${CELL_MARK}`).forEach((el) => el.classList.remove(CELL_MARK));
   }
 
-  let lastStats = { tickets: 0, marked: 0, hidden: 0 };
-
-  function markTickets() {
-    moduleId = detectModule();
+  function paintList() {
     clearMarks();
     const items = collectRows();
-    applyRowVisibility(items);
-    const visible = items.filter((item) => !item.row.classList.contains(HIDE_MARK));
-    const hits = visible.filter(itemMatches);
+    const hits = items.filter(itemMatches);
     if (page().enabled) {
       hits.forEach((item) => {
         item.row.classList.add(ROW_MARK);
@@ -612,10 +1079,40 @@
         if (item.cell) item.cell.classList.add(CELL_MARK);
       });
     }
-    lastStats = { tickets: visible.length, marked: hits.length, hidden: items.length - visible.length };
+    const hidden = Math.max(0, rangeScanned - items.length);
+    lastStats = { tickets: items.length, marked: hits.length, hidden };
     injectStartColumn(items);
     sortTableRows(items);
     renderStats();
+  }
+
+  function markTickets() {
+    moduleId = detectModule();
+    dropStaleLiveRows();
+    if (moduleId !== 'journeys' || !rangeActive()) {
+      teardownRangeView();
+      rangeScanned = 0;
+      paintList();
+      return;
+    }
+    const key = rangeKey();
+    const staticTable = document.getElementById(RANGE_TABLE_ID);
+    if (staticTable && rangeViewKey === key) {
+      paintList();
+      return;
+    }
+    const src = sourceTable();
+    const sourceItems = collectRows(src || document);
+    rangeViewKey = key;
+    rangeComplete = false;
+    rangeScanned = sourceItems.length;
+    const kept = sourceItems.filter(startInRange);
+    mountStaticRows(kept.map((item) => sanitizeClone(item.row.cloneNode(true))));
+    if (!document.getElementById(RANGE_TABLE_ID)) {
+      sourceItems.forEach((item) => item.row.classList.toggle(HIDE_MARK, !startInRange(item)));
+    }
+    paintList();
+    void harvestAndFill(sourceItems);
   }
 
   function sortValue(item, key) {
@@ -635,6 +1132,11 @@
     items.forEach((item) => {
       const body = rowTbody(item.row);
       if (!body) return;
+      const inStatic = !!body.closest(`#${RANGE_TABLE_ID}`);
+      if (!inStatic) {
+        if (key === 'default') return;
+        if (rangeBusy) return;
+      }
       if (!groups.has(body)) groups.set(body, []);
       groups.get(body).push(item);
     });
@@ -914,7 +1416,7 @@
             <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="startCount">0</span><span class="chev">▸</span></span>
           </button>
           <div class="tagbox-body">
-            <p class="hint">From / to keeps only matching start dates visible on this page. Same control: Filter on the column, or right-click a start date.</p>
+            <p class="hint">From / to rebuilds the list to only those start dates. Extra pages are scanned so pagination can turn off when everything fits. Same control: Filter on the column, or right-click a start date.</p>
             <div class="range-row">
               <label class="range-field"><span>From</span><input id="startFrom" type="date" /></label>
               <label class="range-field"><span>To</span><input id="startTo" type="date" /></label>
@@ -1372,7 +1874,12 @@
     localStorage.removeItem(HISTORY_KEY);
     renderReport();
   });
-  $('rescan').addEventListener('click', markTickets);
+  $('rescan').addEventListener('click', () => {
+    rangeViewKey = '';
+    rangeComplete = false;
+    document.getElementById(RANGE_TABLE_ID)?.remove();
+    markTickets();
+  });
 
   function setStartRange(from, to, opts = {}) {
     const range = normalizeRange(from, to);
@@ -1488,6 +1995,10 @@
   }
 
   document.addEventListener('click', (e) => {
+    const pager = e.target.closest?.('.pagination, [data-test-id="pagination"], [aria-label="Next"], [aria-label="Previous"], [aria-label="Next page"], [aria-label="Previous page"], [rel="next"], [rel="prev"], [data-test-id="next-page"], [data-test-id="prev-page"]');
+    if (pager && !pager.closest(`#${HOST_ID}`) && !pager.closest(`#${RANGE_POP_ID}`)) {
+      pendingPageChange = true;
+    }
     const th = e.target.closest?.('th[data-sth-col="start"]');
     if (!th) return;
     e.preventDefault();
@@ -1533,7 +2044,7 @@
 
   let timer;
   window.__staleTicketObserver = new MutationObserver((muts) => {
-    if (muts.every((m) => host.contains(m.target) || m.target.closest?.(`#${HOST_ID}`) || m.target.closest?.(`#${RANGE_POP_ID}`))) return;
+    if (muts.every((m) => host.contains(m.target) || m.target.closest?.(`#${HOST_ID}, #${RANGE_POP_ID}, #${RANGE_TABLE_ID}, #${RANGE_BANNER_ID}`))) return;
     clearTimeout(timer);
     timer = setTimeout(markTickets, 300);
   });
