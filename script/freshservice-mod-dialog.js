@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      2.1.0
+// @version      2.1.1
 // @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
@@ -78,6 +78,7 @@
     collapsed: false,
     x: null,
     y: null,
+    uiOpen: {},
     tickets: { ...PAGE_DEFAULT },
     journeys: { ...PAGE_DEFAULT, days: 7, color: '#1565c0' }
   };
@@ -89,7 +90,8 @@
         ...DEFAULTS,
         ...raw,
         tickets: { ...DEFAULTS.tickets, ...(raw.tickets || {}) },
-        journeys: { ...DEFAULTS.journeys, ...(raw.journeys || {}) }
+        journeys: { ...DEFAULTS.journeys, ...(raw.journeys || {}) },
+        uiOpen: { ...(raw.uiOpen || {}) }
       };
     } catch {
       return JSON.parse(JSON.stringify(DEFAULTS));
@@ -587,14 +589,16 @@
       .titles p { margin: 2px 0 0; font-size: 11px; color: #9aa3ad; }
       .icon-btn { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: #9aa3ad; cursor: pointer; display: grid; place-items: center; }
       .icon-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
-      .body { padding: 14px; display: grid; gap: 12px; }
+      .body { padding: 10px 12px; display: grid; gap: 6px; }
       .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
       .toggle { width: 42px; height: 24px; border-radius: 999px; border: 0; background: #3a4048; position: relative; cursor: pointer; padding: 0; }
       .toggle.on { background: var(--accent, #e65100); }
       .toggle i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
       .toggle.on i { left: 21px; }
-      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
+      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius: 12px; padding: 8px 10px; display: grid; gap: 8px; }
+      .tagbox-head .chev { color: #8b949e; font-size: 10px; width: 12px; text-align: center; }
+      .tagbox.open .tagbox-head .chev { transform: rotate(90deg); }
       .days-val { font-size: 26px; font-weight: 700; color: #fff; }
       .days-val span { font-size: 13px; font-weight: 600; color: #9aa3ad; margin-left: 4px; }
       input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: linear-gradient(90deg, var(--accent) var(--p, 20%), #3a4048 var(--p, 20%)); border-radius: 99px; outline: none; }
@@ -606,7 +610,7 @@
       .seg button { height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: #9aa3ad; font-size: 11px; font-weight: 650; cursor: pointer; }
       .seg button.on { background: var(--accent, #e65100); color: #fff; }
       .hint { margin: 0; font-size: 11px; color: #8b949e; line-height: 1.35; }
-      .tagbox-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; }
+      .tagbox-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 0; min-height: 24px; }
       .tagbox-body { display: none; }
       .tagbox.open .tagbox-body { display: grid; gap: 8px; }
       .tag-count { font-size: 10px; font-weight: 700; color: #9aa3ad; background: rgba(255,255,255,.06); border-radius: 999px; padding: 2px 7px; }
@@ -620,7 +624,8 @@
       .stat { background: rgba(255,255,255,.04); border-radius: 12px; padding: 10px 12px; }
       .stat b { display: block; font-size: 18px; font-weight: 700; }
       .stat span { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-      .foot { display: grid; gap: 8px; padding: 0 14px 14px; }
+      .foot { display: grid; gap: 6px; padding: 0 12px 12px; }
+      .foot-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .ghost, .primary { height: 34px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
       .ghost { border: 1px solid rgba(255,255,255,.08); background: transparent; color: #c5cbd3; }
       .primary { border: 0; color: #fff; background: var(--accent, #e65100); }
@@ -654,42 +659,55 @@
           </div>
         </div>
         <div class="row-between"><span class="label">Highlight</span><button class="toggle" id="enabled"><i></i></button></div>
-        <div class="card">
-          <div class="row-between"><span class="label" id="daysCaption">Idle older than</span><div class="days-val" id="daysLabel">6<span>days</span></div></div>
-          <input type="range" id="days" min="1" max="45" step="1" />
-          <div class="chips" id="dayChips"></div>
+        <div class="card tagbox" data-sec="age">
+          <button type="button" class="tagbox-head" data-toggle="age">
+            <span class="label" id="daysCaption">Age</span>
+            <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="daysLabel">6d</span><span class="chev">▸</span></span>
+          </button>
+          <div class="tagbox-body">
+            <input type="range" id="days" min="1" max="45" step="1" />
+            <div class="chips" id="dayChips"></div>
+          </div>
         </div>
-        <div class="card">
-          <div class="row-between"><span class="label">Match</span>
-            <div class="seg" id="matchMode">
-              <button type="button" data-mode="and">All</button>
-              <button type="button" data-mode="or">Any</button>
+        <div class="card tagbox" data-sec="match">
+          <button type="button" class="tagbox-head" data-toggle="match">
+            <span class="label">Match & views</span>
+            <span class="chev">▸</span>
+          </button>
+          <div class="tagbox-body">
+            <div class="row-between"><span class="label">Match</span>
+              <div class="seg" id="matchMode">
+                <button type="button" data-mode="and">All</button>
+                <button type="button" data-mode="or">Any</button>
+              </div>
+            </div>
+            <p class="hint" id="matchHint"></p>
+            <div class="chips" id="viewPresets"></div>
+            <div class="chips">
+              <button class="ghost" id="saveView" type="button" style="height:28px;flex:1">Save</button>
+              <button class="ghost" id="deleteView" type="button" style="height:28px;flex:1">Delete</button>
             </div>
           </div>
-          <p class="hint" id="matchHint"></p>
-          <span class="label">Views</span>
-          <div class="chips" id="viewPresets"></div>
-          <div class="chips">
-            <button class="ghost" id="saveView" type="button" style="height:28px;flex:1">Save view</button>
-            <button class="ghost" id="deleteView" type="button" style="height:28px;flex:1">Delete</button>
-          </div>
         </div>
-        <div class="card" id="extraFilters"></div>
-        <div class="card" id="sortBox">
-          <div class="row-between">
-            <span class="label">Sort this list</span>
+        <div class="card tagbox" id="extraFilters" data-sec="extra"></div>
+        <div class="card tagbox" id="sortBox" data-sec="sort">
+          <button type="button" class="tagbox-head" data-toggle="sort">
+            <span class="label">Sort</span>
+            <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="sortBadge">Default</span><span class="chev">▸</span></span>
+          </button>
+          <div class="tagbox-body">
             <div class="seg" id="sortDir">
               <button type="button" data-dir="asc">A→Z</button>
               <button type="button" data-dir="desc">Z→A</button>
             </div>
+            <div class="chips" id="sortKeys"></div>
+            <p class="hint" id="sortHint">Reorders rows on this page only.</p>
           </div>
-          <div class="chips" id="sortKeys"></div>
-          <p class="hint" id="sortHint">Reorders rows on this page only.</p>
         </div>
-        <div class="card tagbox" id="statusBox">
-          <button type="button" class="tagbox-head" id="statusToggle">
+        <div class="card tagbox" id="statusBox" data-sec="status">
+          <button type="button" class="tagbox-head" data-toggle="status">
             <span class="label" id="statusLabel">Status</span>
-            <span class="tag-count" id="statusCount">0</span>
+            <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="statusCount">0</span><span class="chev">▸</span></span>
           </button>
           <div class="tagbox-body">
             <div class="tags" id="statusTags"></div>
@@ -697,38 +715,41 @@
             <div class="chips" id="statusHints"></div>
           </div>
         </div>
-        <div class="card tagbox" id="startBox">
-          <button type="button" class="tagbox-head" id="startToggle">
+        <div class="card tagbox" id="startBox" data-sec="start">
+          <button type="button" class="tagbox-head" data-toggle="start">
             <span class="label" id="startLabel">Start date</span>
-            <span class="tag-count" id="startCount">0</span>
+            <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="startCount">0</span><span class="chev">▸</span></span>
           </button>
           <div class="tagbox-body">
-            <p class="hint">Reads “Start DD-MM-YYYY” from the journey title. Pick dates on this list or type one.</p>
+            <p class="hint">From the title: Start DD-MM-YYYY.</p>
             <div class="tags" id="startTags"></div>
             <input id="startInput" type="text" placeholder="14-09-2026 · Enter" autocomplete="off" spellcheck="false" />
             <div class="chips" id="startHints"></div>
           </div>
         </div>
-        <div>
-          <div class="row-between" style="margin-bottom:8px"><span class="label">Color</span></div>
-          <div class="chips">
-            <button class="swatch" data-color="#e65100" style="background:#e65100"></button>
-            <button class="swatch" data-color="#c62828" style="background:#c62828"></button>
-            <button class="swatch" data-color="#6a1b9a" style="background:#6a1b9a"></button>
-            <button class="swatch" data-color="#1565c0" style="background:#1565c0"></button>
-            <button class="swatch" data-color="#2e7d32" style="background:#2e7d32"></button>
-            <input type="color" id="customColor" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
+        <div class="card tagbox" data-sec="color">
+          <button type="button" class="tagbox-head" data-toggle="color">
+            <span class="label">Color</span>
+            <span class="chev">▸</span>
+          </button>
+          <div class="tagbox-body">
+            <div class="chips">
+              <button class="swatch" data-color="#e65100" style="background:#e65100"></button>
+              <button class="swatch" data-color="#c62828" style="background:#c62828"></button>
+              <button class="swatch" data-color="#6a1b9a" style="background:#6a1b9a"></button>
+              <button class="swatch" data-color="#1565c0" style="background:#1565c0"></button>
+              <button class="swatch" data-color="#2e7d32" style="background:#2e7d32"></button>
+              <input type="color" id="customColor" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
+            </div>
           </div>
-        </div>
-        <div class="stats">
-          <div class="stat"><b id="statTickets">0</b><span>Scanned</span></div>
-          <div class="stat"><b id="statMarked">0</b><span>Marked</span></div>
         </div>
       </div>
       <div class="foot">
         <button class="primary" id="openStale">Open marked tabs</button>
-        <button class="ghost" id="openStats">Statistics</button>
-        <button class="ghost" id="rescan">Rescan</button>
+        <div class="foot-row">
+          <button class="ghost" id="openStats">Statistics</button>
+          <button class="ghost" id="rescan">Rescan</button>
+        </div>
       </div>
     </section>
     <section class="panel report" id="report">
@@ -817,10 +838,11 @@
     else placeDefault();
   }
   function renderStats() {
-    $('statTickets').textContent = String(lastStats.tickets);
-    $('statMarked').textContent = String(lastStats.marked);
     $('fabCount').textContent = String(lastStats.marked);
-    $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked tab${lastStats.marked === 1 ? '' : 's'}` : 'Open marked tabs';
+    const name = moduleId === 'journeys' ? 'Journeys' : 'Tickets';
+    const prefix = settings.module === 'auto' ? `Auto · ${name}` : name;
+    $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}`;
+    $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked` : 'Open marked tabs';
   }
   function discoveredStatuses() {
     return [...new Set(collectRows().map((r) => r.status).filter((s) => s && s !== '—'))].sort((a, b) => a.localeCompare(b));
@@ -850,7 +872,7 @@
     const key = parseStartInput(raw);
     if (!key) return;
     if ((page().startDates || []).includes(key)) return;
-    updatePage({ startDates: [...(page().startDates || []), key], activePreset: null, startOpen: true });
+    updatePage({ startDates: [...(page().startDates || []), key], activePreset: null });
   }
   function renderStartTags() {
     const wrap = $('startTags');
@@ -886,8 +908,6 @@
       startWithin: p.startWithin ?? null,
       startDates: [...(p.startDates || [])],
       activePreset: p.id,
-      statusOpen: !!(p.statuses && p.statuses.length),
-      startOpen: !!(p.startDates && p.startDates.length)
     });
   }
   function renderExtraFilters() {
@@ -896,20 +916,26 @@
     box.style.display = 'grid';
     const cfg = page();
     box.innerHTML = `
-      <div class="row-between"><span class="label">Max child progress %</span><b>${cfg.maxProgress == null ? 'off' : cfg.maxProgress + '%'}</b></div>
-      <input type="range" id="maxProgress" min="0" max="100" step="5" value="${cfg.maxProgress == null ? 100 : cfg.maxProgress}" />
-      <div class="chips">
-        <button type="button" class="chip" data-prog="">Off</button>
-        <button type="button" class="chip" data-prog="25">≤25%</button>
-        <button type="button" class="chip" data-prog="40">≤40%</button>
-        <button type="button" class="chip" data-prog="60">≤60%</button>
-      </div>
-      <div class="row-between"><span class="label">Start within days</span><b>${cfg.startWithin == null ? 'off' : cfg.startWithin + 'd'}</b></div>
-      <div class="chips">
-        <button type="button" class="chip" data-start="">Off</button>
-        <button type="button" class="chip" data-start="3">3d</button>
-        <button type="button" class="chip" data-start="7">7d</button>
-        <button type="button" class="chip" data-start="14">14d</button>
+      <button type="button" class="tagbox-head" data-toggle="extra">
+        <span class="label">Journey extras</span>
+        <span class="chev">▸</span>
+      </button>
+      <div class="tagbox-body">
+        <div class="row-between"><span class="label">Max child progress %</span><b>${cfg.maxProgress == null ? 'off' : cfg.maxProgress + '%'}</b></div>
+        <input type="range" id="maxProgress" min="0" max="100" step="5" value="${cfg.maxProgress == null ? 100 : cfg.maxProgress}" />
+        <div class="chips">
+          <button type="button" class="chip" data-prog="">Off</button>
+          <button type="button" class="chip" data-prog="25">≤25%</button>
+          <button type="button" class="chip" data-prog="40">≤40%</button>
+          <button type="button" class="chip" data-prog="60">≤60%</button>
+        </div>
+        <div class="row-between"><span class="label">Start within days</span><b>${cfg.startWithin == null ? 'off' : cfg.startWithin + 'd'}</b></div>
+        <div class="chips">
+          <button type="button" class="chip" data-start="">Off</button>
+          <button type="button" class="chip" data-start="3">3d</button>
+          <button type="button" class="chip" data-start="7">7d</button>
+          <button type="button" class="chip" data-start="14">14d</button>
+        </div>
       </div>`;
     box.querySelectorAll('[data-prog]').forEach((btn) => btn.addEventListener('click', () => updatePage({ maxProgress: btn.dataset.prog === '' ? null : Number(btn.dataset.prog), activePreset: null })));
     box.querySelectorAll('[data-start]').forEach((btn) => btn.addEventListener('click', () => updatePage({ startWithin: btn.dataset.start === '' ? null : Number(btn.dataset.start), activePreset: null })));
@@ -951,6 +977,7 @@
     });
     shadow.querySelectorAll('#sortDir button').forEach((btn) => btn.classList.toggle('on', btn.dataset.dir === cfg.sortDir));
     const label = sortOptions().find((o) => o.id === cfg.sortKey)?.name || 'Default';
+    if ($('sortBadge')) $('sortBadge').textContent = label;
     $('sortHint').textContent = cfg.sortKey === 'default'
       ? 'Table order from Freshservice.'
       : `Sorted by ${label}, ${cfg.sortDir === 'desc' ? 'newest / Z first' : 'oldest / A first'}.`;
@@ -964,11 +991,11 @@
     $('panelTitle').textContent = name;
     $('panelSub').textContent = settings.module === 'auto' ? `Auto · ${name}` : name;
     $('fabLabel').textContent = name;
-    $('daysCaption').textContent = moduleId === 'journeys' ? 'Status / created older than' : 'Updated older than';
+    $('daysCaption').textContent = moduleId === 'journeys' ? 'Age' : 'Idle age';
     $('enabled').classList.toggle('on', cfg.enabled);
     $('days').value = String(cfg.days);
     $('days').style.setProperty('--p', ((cfg.days - 1) / 44) * 100 + '%');
-    $('daysLabel').innerHTML = `${cfg.days}<span>day${cfg.days === 1 ? '' : 's'}</span>`;
+    $('daysLabel').textContent = `${cfg.days}d`;
     $('customColor').value = cfg.color;
     $('dayChips').innerHTML = [3, 6, 10, 14, 21, 30].map((d) => `<button type="button" class="chip${d === cfg.days ? ' on' : ''}" data-days="${d}">${d}d</button>`).join('');
     $('dayChips').querySelectorAll('[data-days]').forEach((btn) => btn.addEventListener('click', () => updatePage({ days: Number(btn.dataset.days), activePreset: null })));
@@ -979,11 +1006,11 @@
       : `Mark if age, status, or start date matches.`;
     $('statusLabel').textContent = cfg.matchMode === 'and' ? 'Limit to status' : 'Also mark status';
     $('statusCount').textContent = String(cfg.statuses.length);
-    $('statusBox').classList.toggle('open', !!cfg.statusOpen);
     $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
     $('startCount').textContent = String((cfg.startDates || []).length);
-    $('startBox').classList.toggle('open', !!cfg.startOpen);
     $('startBox').style.display = moduleId === 'journeys' ? '' : 'none';
+    const open = settings.uiOpen || {};
+    shadow.querySelectorAll('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec]));
     $('deleteView').style.visibility = (cfg.presets || []).some((p) => p.id === cfg.activePreset) ? 'visible' : 'hidden';
     shadow.querySelectorAll('.swatch').forEach((sw) => sw.classList.toggle('on', sw.dataset.color.toLowerCase() === cfg.color.toLowerCase()));
     panel.classList.toggle('hide', settings.collapsed || reportOpen);
@@ -1041,8 +1068,16 @@
   makeDraggable($('reportHandle'));
   makeDraggable(fab);
 
-  $('statusToggle').addEventListener('click', (e) => { e.stopPropagation(); updatePage({ statusOpen: !page().statusOpen }); });
-  $('startToggle').addEventListener('click', (e) => { e.stopPropagation(); updatePage({ startOpen: !page().startOpen }); });
+  shadow.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-toggle]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = btn.dataset.toggle;
+    const open = { ...(settings.uiOpen || {}) };
+    open[id] = !open[id];
+    updateRoot({ uiOpen: open });
+  });
   const statusInput = $('statusInput');
   const startInput = $('startInput');
   ['keydown', 'keypress', 'keyup'].forEach((type) => {
