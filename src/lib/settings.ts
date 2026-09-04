@@ -2,6 +2,7 @@
 // Agent: READS/WRITES STORAGE_KEY. Always merge onto defaults and normalize arrays/enums so old payloads keep working.
 
 import { STORAGE_KEY, defaultSettings } from './constants';
+import { normalizeRange } from './range';
 import type { MatchMode, PageSettings, Settings, SortDir, SortKey } from './types';
 
 function isMatchMode(v: unknown): v is MatchMode {
@@ -21,6 +22,9 @@ export function normalizePage(page: PageSettings): PageSettings {
   if (!Array.isArray(next.statuses)) next.statuses = [];
   if (!Array.isArray(next.presets)) next.presets = [];
   if (!Array.isArray(next.startDates)) next.startDates = [];
+  const range = normalizeRange(next.startFrom, next.startTo);
+  next.startFrom = range.startFrom;
+  next.startTo = range.startTo;
   if (!isMatchMode(next.matchMode) || next.matchMode !== 'and') next.matchMode = 'or';
   if (!isSortKey(next.sortKey)) next.sortKey = 'default';
   if (!isSortDir(next.sortDir) || next.sortDir !== 'desc') next.sortDir = 'asc';

@@ -1,7 +1,7 @@
 // Human: Journey / onboarding API helpers — custom start dates and child-ticket progress.
-// Agent: READS /api/v2/journeys/requests and /api/v2/onboarding_requests/{id}/tickets. Date fields named *date* / start / joining win.
+// Agent: READS /api/v2/journeys/requests and /api/v2/onboarding_requests/{id}/tickets. Start prefers *date*/start/joining fields, then title.
 
-import { dateKey } from '../dates';
+import { dateKey, parseStartDate } from '../dates';
 import { MS_DAY } from '../constants';
 import type { Progress, Reportable } from '../types';
 import { apiRequest, asArray, asRecord } from './http';
@@ -87,8 +87,11 @@ export async function fetchOnboardingChildren(id: number): Promise<unknown[]> {
   return asArray(root.tickets || root.onboarding_tickets);
 }
 
-export async function listJourneys(maxPages = 5): Promise<ApiJourney[]> {
+// Human: Page journey / onboarding requests. Tries journeys/requests then onboarding_requests.
+// Agent: READS those list endpoints. ok is true if any page returned HTTP 2xx.
+export async function fetchJourneyList(maxPages = 5): Promise<{ rows: ApiJourney[]; ok: boolean }> {
   const out: ApiJourney[] = [];
+  let ok = false;
   for (let page = 1; page <= maxPages; page += 1) {
     let res = await apiRequest(`/api/v2/journeys/requests?per_page=100&page=${page}`);
     let batch = asArray(asRecord(res.json).journey_requests || asRecord(res.json).requests);
@@ -96,17 +99,28 @@ export async function listJourneys(maxPages = 5): Promise<ApiJourney[]> {
       res = await apiRequest(`/api/v2/onboarding_requests?per_page=100&page=${page}`);
       batch = asArray(asRecord(res.json).onboarding_requests);
     }
+    if (res.ok) ok = true;
     const rows = batch.map(asApiJourney).filter((j): j is ApiJourney => !!j);
     out.push(...rows);
     if (rows.length < 100) break;
   }
-  return out;
+  return { rows: out, ok };
 }
 
-export function journeyToReportable(journey: ApiJourney, now: number, progress: Progress = { pct: null, done: null, total: null }): Reportable {
+export async function listJourneys(maxPages = 5): Promise<ApiJourney[]> {
+  const { rows } = await fetchJourneyList(maxPages);
+  return rows;
+}
+
+export function journeyToReportable(
+  journey: ApiJourney,
+  now: number,
+  progress: Progress = { pct: null, done: null, total: null },
+  href: string | null = null,
+): Reportable {
   const updated = journey.updated_at ? new Date(journey.updated_at) : null;
   const created = journey.created_at ? new Date(journey.created_at) : null;
-  const start = startFromCustomFields(journey.initiator_data?.custom_fields);
+  const start = startFromCustomFields(journey.initiator_data?.custom_fields) || parseStartDate(journey.title);
   const idleSrc = updated && !Number.isNaN(updated.getTime()) ? updated : created;
   const idleDays = idleSrc && !Number.isNaN(idleSrc.getTime()) ? (now - idleSrc.getTime()) / MS_DAY : null;
   const startIn = start ? (start.getTime() - now) / MS_DAY : null;
@@ -115,8 +129,11 @@ export function journeyToReportable(journey: ApiJourney, now: number, progress: 
     status,
     idleDays,
     startKey: dateKey(start),
+    updatedKey: dateKey(idleSrc && !Number.isNaN(idleSrc.getTime()) ? idleSrc : null),
     startIn,
     progress,
     kind: '—',
+    href,
+    label: journey.title || `Journey #${journey.display_id || journey.id}`,
   };
 }

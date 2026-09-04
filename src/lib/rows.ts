@@ -102,6 +102,7 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       kind: employeeKind(title),
       progress,
       startKey: dateKey(start),
+      updatedKey: dateKey(updated),
       initiator: initiatorName(row),
       ord: Number(row.dataset.sthOrd || idx),
       label: sanitizeTitle(title),

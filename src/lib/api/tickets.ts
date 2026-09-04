@@ -2,6 +2,7 @@
 // Agent: READS /api/v2/ticket_form_fields and /api/v2/tickets/filter. Caches maps for 10 minutes.
 
 import { MS_DAY } from '../constants';
+import { dateKey } from '../dates';
 import type { PageSettings, Reportable } from '../types';
 import { apiRequest, asArray, asRecord } from './http';
 import { buildTicketFilterQuery, chunkIds, idsQuery } from './query';
@@ -131,29 +132,49 @@ export async function fetchTicketsByIds(ids: number[]): Promise<Map<number, ApiT
   return out;
 }
 
-export async function filterTickets(cfg: PageSettings, maps: StatusMaps, maxPages = 5): Promise<ApiTicket[]> {
-  const query = buildTicketFilterQuery(cfg, maps.byName);
+// Human: Page a /tickets/filter query. ok is false when the first page fails (no key, 401, bad query).
+// Agent: READS /api/v2/tickets/filter. Caps at maxPages × 100.
+export async function filterTicketsQuery(query: string, maxPages = 5): Promise<{ tickets: ApiTicket[]; ok: boolean }> {
+  if (!query.trim()) return { tickets: [], ok: false };
   const encoded = encodeURIComponent(`"${query}"`);
   const out: ApiTicket[] = [];
+  let ok = false;
   for (let page = 1; page <= maxPages; page += 1) {
     const res = await apiRequest(`/api/v2/tickets/filter?query=${encoded}&page=${page}&per_page=100`);
-    if (!res.ok) break;
+    if (!res.ok) {
+      if (page === 1) return { tickets: [], ok: false };
+      break;
+    }
+    ok = true;
     const batch = asArray(asRecord(res.json).tickets).map(asApiTicket).filter((t): t is ApiTicket => !!t);
     out.push(...batch);
     if (batch.length < 100) break;
   }
-  return out;
+  return { tickets: out, ok };
 }
 
-export function ticketToReportable(ticket: ApiTicket, maps: StatusMaps, now: number): Reportable {
+export async function filterTickets(cfg: PageSettings, maps: StatusMaps, maxPages = 5): Promise<ApiTicket[]> {
+  const { tickets } = await filterTicketsQuery(buildTicketFilterQuery(cfg, maps.byName), maxPages);
+  return tickets;
+}
+
+export function ticketToReportable(
+  ticket: ApiTicket,
+  maps: StatusMaps,
+  now: number,
+  href: string | null = null,
+): Reportable {
   const updated = parseIso(ticket.updated_at);
   const created = parseIso(ticket.created_at);
   return {
     status: statusLabel(ticket.status, maps),
     idleDays: idleFromUpdated(updated, created, now),
     startKey: null,
+    updatedKey: dateKey(updated),
     startIn: null,
     progress: { pct: null },
     kind: '—',
+    href,
+    label: ticket.subject || `Ticket #${ticket.id}`,
   };
 }

@@ -45,6 +45,23 @@
         </div>
       </div>
     </div>
+    <div class="card tagbox" data-sec="range" data-feature="list-range">
+      <button type="button" class="tagbox-head" data-toggle="range">
+        <span class="label" id="rangeCaption">Date range</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="rangeBadge">Off</span><span class="chev">▸</span></span>
+      </button>
+      <div class="tagbox-body">
+        <p class="hint" id="rangeHint">Save an API key in Settings to list by date range.</p>
+        <div class="range-row">
+          <label class="range-field"><span>From</span><input id="rangeFrom" type="date" disabled /></label>
+          <label class="range-field"><span>To</span><input id="rangeTo" type="date" disabled /></label>
+        </div>
+        <div class="chips">
+          <button class="primary" id="applyRange" type="button" style="height:28px;flex:1" disabled>Apply</button>
+          <button class="ghost" id="clearRange" type="button" style="height:28px;flex:1" disabled>Clear</button>
+        </div>
+      </div>
+    </div>
     <div class="card tagbox" id="extraFilters" data-sec="extra" data-feature="extra"></div>
     <div class="card tagbox" id="sortBox" data-sec="sort" data-feature="list-sort">
       <button type="button" class="tagbox-head" data-toggle="sort">
@@ -122,6 +139,18 @@
   <div class="foot">
     <button class="primary" id="saveSnap">Save snapshot</button>
     <button class="ghost" id="clearHist">Clear history</button>
+  </div>
+</section>
+<section class="panel report hide" id="resultsPanel">
+  <header class="head" id="resultsHandle">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    <div class="titles"><h1 id="resultsTitle">Range results</h1><p id="resultsSub">API list</p></div>
+    <button class="icon-btn" id="closeResults"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </header>
+  <div class="body" id="resultsBody"></div>
+  <div class="foot">
+    <button class="primary" id="openRangeTabs">Open listed tabs</button>
+    <button class="ghost" id="clearRangeFromResults">Clear range</button>
   </div>
 </section>
 <section class="panel hide" id="settingsPanel">

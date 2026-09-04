@@ -66,6 +66,15 @@ describe('loadSettings', () => {
     expect(s.tickets.sortDir).toBe('asc');
   });
 
+  it('normalizes inverted from–to dates', () => {
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      tickets: { startFrom: '2026-09-20', startTo: '2026-09-10' },
+    }));
+    const s = loadSettings(storage);
+    expect(s.tickets.startFrom).toBe('2026-09-10');
+    expect(s.tickets.startTo).toBe('2026-09-20');
+  });
+
   it('round-trips through saveSettings', () => {
     const s = loadSettings(storage);
     s.tickets.days = 9;

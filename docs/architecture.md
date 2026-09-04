@@ -12,12 +12,14 @@ src/
     context.ts          list / detail / other + module
     dates.ts            Ticket cell dates + journey Start-from-title
     match.ts            AND/OR idle / status / start / progress
+    range.ts            Inclusive from–to keys for the results overlay
     secrets.ts          Message the worker (or sessionStorage in userscripts)
     settings.ts         localStorage merge + normalize
     rows.ts             tr.et-tr → RowItem
     sort.ts             Visible-page comparator
     stats.ts            Buckets and snapshots (no names)
     detect.ts           tickets vs journeys
+    api/                Freshservice v2 client, ticket/journey enrich, range list
   page/                 Host-page mutations (highlight, start column)
   panel/                Shadow-DOM UI (html/css + event wiring)
     features.ts         Context-gated cards + registerPanelFeature()
@@ -28,6 +30,8 @@ extension/
 Vite bundles `src/content.ts` as an IIFE to `dist/sth-extension/content.js`. A packager then copies the manifest, `background.js`, generates icons, wraps a userscript header, and zips the folder.
 
 When an API key is saved, `enrichList` overlays `updated_at` / status (tickets) and custom start dates / child-ticket progress (journeys) onto visible rows, and loads off-page matches for **Open marked** and statistics (capped at 500). Without a key, the panel stays DOM-only.
+
+A from–to **date range** (`startFrom` / `startTo`) is a separate overlay, not part of idle/status highlighting. It stays **disabled until an API key is saved**. With a key, set From / To and click **Apply** — dates are not queried on change. Tickets are listed by `updated_at`; journeys by start date (API custom field, then `Start DD-MM-YYYY` in the title). Results render in **Range results**. The live Freshservice table is never hidden, rebuilt, or de-paginated.
 
 ## Isolation
 
@@ -61,8 +65,9 @@ To add a new context-specific card without restyling the panel:
 
 - **OR:** idle age **or** a selected status **or** a selected start date (plus optional progress / start-within).
 - **AND:** idle age **and** each *non-empty* tag list. Empty status or start-date lists are skipped, not treated as “match nothing”.
+- **Date range** does not participate. It only fills the Range results overlay.
 
-Journey start dates are parsed only from the subject (`Start` / `Starting` + day-first date). Do not use Updated/Created cells for that column.
+Journey start dates come from the subject (`Start` / `Starting` + day-first date) on the page, and from initiator custom fields when the API key works. Do not use Updated/Created cells for that column.
 
 ## List updates
 

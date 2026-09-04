@@ -1,20 +1,23 @@
-// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, drag position.
-// Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on filter changes. Isolated from the host page CSS.
+// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, drag position.
+// Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on highlight-filter changes. Range overlay CALLS listRangeResults and does not mutate the host table.
 
+import { listRangeResults } from '../lib/api/enrich';
 import { contextLabel, detectContext } from '../lib/context';
 import { HISTORY_KEY, JOURNEY_PRESETS, TICKET_PRESETS } from '../lib/constants';
 import { formatStart, parseStartInput } from '../lib/dates';
+import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
 import { collectRows } from '../lib/rows';
 import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
-import { assignRoot, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, page, patchPage, patchRoot, setModuleId } from '../lib/state';
+import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
 import { buildReport } from '../lib/stats';
 import { escapeHtml, fmtDur } from '../lib/text';
 import type { MatchMode, ModuleSetting, PageSettings, Preset, SortDir, SortKey } from '../lib/types';
 import { markTickets, openMarked, paintList } from '../page/paint';
 import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
+import { syncStartColumnHeader } from '../page/start-column';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
@@ -31,9 +34,13 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const fab = $('fab');
   const report = $('report');
   const settingsPanel = $('settingsPanel');
+  const resultsPanel = $('resultsPanel');
   let reportOpen = false;
   let settingsOpen = false;
+  let resultsOpen = false;
   const didDrag = { current: false };
+  let rangeDraft: { startFrom: string | null; startTo: string | null } | null = null;
+  let rangeDraftModule: ReturnType<typeof getModuleId> | null = null;
 
   function builtinPresets(): Preset[] {
     return getModuleId() === 'journeys' ? JOURNEY_PRESETS : TICKET_PRESETS;
@@ -87,6 +94,135 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       <p class="note">${meta.fromApi ? 'Idle uses ticket updated_at from the API when a key is saved. ' : 'Journeys use the badge “since N days” when present, otherwise created-on. '}Person names are stripped from stored labels.</p>`;
   }
 
+  // Human: Range overlay — our table only. Does not hide or rebuild the live Freshservice list.
+  // Agent: READS getLastRangeResults; WRITES #resultsBody. CALLS listRangeResults from loadAndRenderRange.
+  function renderResults(): void {
+    const cfg = page();
+    const meta = getLastRangeMeta();
+    const rows = getLastRangeResults();
+    const journeys = getModuleId() === 'journeys';
+    const dateHead = journeys ? 'Start' : 'Updated';
+    const ranged = rangeActive(cfg.startFrom, cfg.startTo);
+    $('resultsTitle').textContent = 'Range results';
+    const rangeBit = ranged ? ` · ${formatRangeLabel(cfg.startFrom, cfg.startTo)}` : '';
+    const src = meta.fromApi ? (meta.truncated ? 'API · capped at 500' : 'API') : 'this page';
+    $('resultsSub').textContent = `${rows.length} rows${rangeBit} · ${src}`;
+    if (!ranged) {
+      $('resultsBody').innerHTML = '<p class="note">Set From and/or To to list items. Freshservice’s table stays as it is.</p>';
+      return;
+    }
+    if (!rows.length) {
+      $('resultsBody').innerHTML = `<p class="note">${meta.fromApi
+        ? 'No items in this range.'
+        : 'No matches on this page. Save an API key in Settings to list every ticket or journey in the range without changing Freshservice’s table.'}</p>`;
+      return;
+    }
+    const sorted = [...rows].sort((a, b) => {
+      const ka = (journeys ? a.startKey : a.updatedKey) || a.startKey || a.updatedKey || '';
+      const kb = (journeys ? b.startKey : b.updatedKey) || b.startKey || b.updatedKey || '';
+      return ka.localeCompare(kb);
+    });
+    $('resultsBody').innerHTML = `<table class="split"><thead><tr><th>${dateHead}</th><th>Status</th><th>Item</th></tr></thead><tbody>${sorted.map((row) => {
+      const key = journeys ? row.startKey : row.updatedKey;
+      const date = key ? escapeHtml(formatStart(key)) : '—';
+      const label = escapeHtml(row.label || row.status);
+      const cell = row.href
+        ? `<a href="${escapeHtml(row.href)}" target="_blank" rel="noopener">${label}</a>`
+        : label;
+      return `<tr><td>${date}</td><td>${escapeHtml(row.status)}</td><td>${cell}</td></tr>`;
+    }).join('')}</tbody></table><p class="note">This table is ours. Freshservice’s list, pager, and sort are unchanged.</p>`;
+  }
+
+  let rangeGen = 0;
+  async function loadAndRenderRange(force = false): Promise<void> {
+    if (!rangeListingEnabled(hasApiKeyPresent())) {
+      $('resultsBody').innerHTML = '<p class="note">Save an API key in Settings to list by date range.</p>';
+      return;
+    }
+    const gen = ++rangeGen;
+    $('resultsBody').innerHTML = '<p class="note">Loading…</p>';
+    const result = await listRangeResults(collectRows(), force);
+    if (gen !== rangeGen) return;
+    setLastRangeResults(result.rows, { truncated: result.truncated, fromApi: result.fromApi });
+    renderResults();
+  }
+
+  // Human: Draft From/To until Apply. Saved settings are the applied range.
+  function shownRange(): { startFrom: string | null; startTo: string | null } {
+    if (rangeDraft && rangeDraftModule === getModuleId()) return rangeDraft;
+    const cfg = page();
+    return { startFrom: cfg.startFrom, startTo: cfg.startTo };
+  }
+
+  function expandRangeSection(): void {
+    const open = { ...(getSettings().uiOpen || {}), range: true };
+    if (getSettings().collapsed) patchRoot({ collapsed: false, uiOpen: open });
+    else patchRoot({ uiOpen: open });
+    syncUI();
+  }
+
+  function showResults(): void {
+    if (!rangeListingEnabled(hasApiKeyPresent())) {
+      expandRangeSection();
+      return;
+    }
+    const cfg = page();
+    if (!rangeActive(cfg.startFrom, cfg.startTo)) {
+      expandRangeSection();
+      return;
+    }
+    resultsOpen = true;
+    reportOpen = false;
+    settingsOpen = false;
+    if (getSettings().collapsed) patchRoot({ collapsed: false });
+    syncUI();
+    void loadAndRenderRange(false);
+  }
+
+  function setRange(from: string | null, to: string | null, openTable = true): void {
+    const next = normalizeRange(from, to);
+    const active = rangeActive(next.startFrom, next.startTo);
+    if (active && !rangeListingEnabled(hasApiKeyPresent())) return;
+    rangeDraft = null;
+    rangeDraftModule = null;
+    patchPage({ startFrom: next.startFrom, startTo: next.startTo, activePreset: null });
+    if (active && openTable) {
+      resultsOpen = true;
+      reportOpen = false;
+      settingsOpen = false;
+      if (getSettings().collapsed) patchRoot({ collapsed: false });
+    } else if (!active) {
+      resultsOpen = false;
+      setLastRangeResults([], { truncated: false, fromApi: false });
+    }
+    syncUI();
+    syncStartColumnHeader();
+    if (resultsOpen) void loadAndRenderRange(true);
+  }
+
+  // Human: Commit the date inputs and open the overlay. No-op without a key or dates.
+  // Agent: CALLS setRange. Does not run on input change.
+  function applyRange(): void {
+    if (!rangeListingEnabled(hasApiKeyPresent())) return;
+    const next = normalizeRange(
+      ($('rangeFrom') as HTMLInputElement).value,
+      ($('rangeTo') as HTMLInputElement).value,
+    );
+    if (!rangeActive(next.startFrom, next.startTo)) return;
+    setRange(next.startFrom, next.startTo, true);
+  }
+
+  function openRangeUrls(): void {
+    const urls = [...new Set(getLastRangeResults().map((row) => row.href).filter((u): u is string => !!u))];
+    if (!urls.length) return;
+    if (urls.length > 8 && !confirm(`Open ${urls.length} listed items in new tabs?`)) return;
+    let opened = 0;
+    urls.forEach((url) => {
+      if (window.open(url, '_blank', 'noopener')) opened += 1;
+    });
+    if (opened < urls.length) alert(`Opened ${opened} of ${urls.length} tabs. Allow pop-ups for this site.`);
+  }
+
   function clampPos(x: number, y: number): { x: number; y: number } {
     const rect = host.getBoundingClientRect();
     const pad = 8;
@@ -136,8 +272,16 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   async function refreshApiKeyStatus(): Promise<void> {
     const key = await getApiKey();
-    $('apiKeyStatus').textContent = key ? `Saved · ${maskApiKey(key)}` : 'No key saved';
-    $('settingsSub').textContent = key ? 'API key saved' : 'API access';
+    const present = !!key.trim();
+    $('apiKeyStatus').textContent = present ? `Saved · ${maskApiKey(key)}` : 'No key saved';
+    $('settingsSub').textContent = present ? 'API key saved' : 'API access';
+    setApiKeyPresent(present);
+    if (!present && resultsOpen) {
+      resultsOpen = false;
+      setLastRangeResults([], { truncated: false, fromApi: false });
+    }
+    syncUI();
+    syncStartColumnHeader();
   }
 
   function discoveredStatuses(): string[] {
@@ -210,6 +354,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   function applyPreset(id: string): void {
     const p = allPresets().find((x) => x.id === id);
     if (!p) return;
+    rangeDraft = null;
+    rangeDraftModule = null;
     updatePage({
       days: p.days,
       statuses: [...(p.statuses || [])],
@@ -217,6 +363,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       maxProgress: p.maxProgress ?? null,
       startWithin: p.startWithin ?? null,
       startDates: [...(p.startDates || [])],
+      startFrom: p.startFrom ?? null,
+      startTo: p.startTo ?? null,
       activePreset: p.id,
     });
   }
@@ -353,17 +501,52 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     $('statusCount').textContent = String(cfg.statuses.length);
     $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
     $('startCount').textContent = String((cfg.startDates || []).length);
+    const journeys = getModuleId() === 'journeys';
+    if (rangeDraft && rangeDraftModule !== getModuleId()) {
+      rangeDraft = null;
+      rangeDraftModule = null;
+    }
+    const canRange = rangeListingEnabled(hasApiKeyPresent());
+    const shown = shownRange();
+    const rangeCard = shadow.querySelector<HTMLElement>('[data-feature="list-range"]');
+    rangeCard?.classList.toggle('range-locked', !canRange);
+    $('rangeCaption').textContent = journeys ? 'Start date range' : 'Updated range';
+    $('rangeHint').textContent = !canRange
+      ? 'Save an API key in Settings to list by date range.'
+      : journeys
+        ? 'Set From / to, then Apply. Lists journeys by start date. Freshservice’s list is left alone.'
+        : 'Set From / to, then Apply. Lists tickets by updated_at. Freshservice’s list is left alone.';
+    const rangeText = formatRangeLabel(cfg.startFrom, cfg.startTo);
+    $('rangeBadge').textContent = !canRange ? 'Needs key' : (rangeText || 'Off');
+    const fromInput = $('rangeFrom') as HTMLInputElement;
+    const toInput = $('rangeTo') as HTMLInputElement;
+    const editingRange = shadow.activeElement === fromInput || shadow.activeElement === toInput;
+    if (!editingRange) {
+      fromInput.value = shown.startFrom || '';
+      toInput.value = shown.startTo || '';
+    }
+    fromInput.disabled = !canRange;
+    toInput.disabled = !canRange;
+    const applyBtn = $('applyRange') as HTMLButtonElement;
+    const clearBtn = $('clearRange') as HTMLButtonElement;
+    applyBtn.disabled = !rangeApplyReady(canRange, shown.startFrom, shown.startTo);
+    clearBtn.disabled = !canRange;
+    clearBtn.style.visibility = canRange && (rangeActive(shown.startFrom, shown.startTo) || rangeActive(cfg.startFrom, cfg.startTo))
+      ? 'visible'
+      : 'hidden';
     const open = settings.uiOpen || {};
     shadow.querySelectorAll<HTMLElement>('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec || '']));
     $('deleteView').style.visibility = (cfg.presets || []).some((p) => p.id === cfg.activePreset) ? 'visible' : 'hidden';
     shadow.querySelectorAll<HTMLElement>('.swatch').forEach((sw) => {
       sw.classList.toggle('on', (sw.dataset.color || '').toLowerCase() === cfg.color.toLowerCase());
     });
-    const overlay = reportOpen || settingsOpen;
+    const overlay = reportOpen || settingsOpen || resultsOpen;
     panel.classList.toggle('hide', settings.collapsed || overlay);
     fab.classList.toggle('show', settings.collapsed && !overlay);
     report.classList.toggle('show', reportOpen && !settings.collapsed);
     settingsPanel.classList.toggle('hide', !settingsOpen || settings.collapsed);
+    resultsPanel.classList.toggle('show', resultsOpen && !settings.collapsed);
+    resultsPanel.classList.toggle('hide', !resultsOpen || settings.collapsed);
     renderViewPresets();
     renderStatusTags();
     renderStartTags();
@@ -424,6 +607,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   makeDraggable($('dragHandle'));
   makeDraggable($('reportHandle'));
   makeDraggable($('settingsHandle'));
+  makeDraggable($('resultsHandle'));
   makeDraggable(fab);
 
   shadow.addEventListener('click', (e) => {
@@ -441,10 +625,40 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const statusInput = $('statusInput') as HTMLInputElement;
   const startInput = $('startInput') as HTMLInputElement;
   const apiKeyInput = $('apiKeyInput') as HTMLInputElement;
+  const rangeFromInput = $('rangeFrom') as HTMLInputElement;
+  const rangeToInput = $('rangeTo') as HTMLInputElement;
   (['keydown', 'keypress', 'keyup'] as const).forEach((type) => {
     statusInput.addEventListener(type, (e) => e.stopPropagation());
     startInput.addEventListener(type, (e) => e.stopPropagation());
     apiKeyInput.addEventListener(type, (e) => e.stopPropagation());
+    rangeFromInput.addEventListener(type, (e) => e.stopPropagation());
+    rangeToInput.addEventListener(type, (e) => e.stopPropagation());
+  });
+  const captureRangeDraft = () => {
+    rangeDraft = normalizeRange(rangeFromInput.value, rangeToInput.value);
+    rangeDraftModule = getModuleId();
+    const applyBtn = $('applyRange') as HTMLButtonElement;
+    applyBtn.disabled = !rangeApplyReady(hasApiKeyPresent(), rangeDraft.startFrom, rangeDraft.startTo);
+  };
+  rangeFromInput.addEventListener('input', captureRangeDraft);
+  rangeToInput.addEventListener('input', captureRangeDraft);
+  rangeFromInput.addEventListener('change', captureRangeDraft);
+  rangeToInput.addEventListener('change', captureRangeDraft);
+  $('applyRange').addEventListener('click', applyRange);
+  $('clearRange').addEventListener('click', () => {
+    rangeDraft = null;
+    rangeDraftModule = null;
+    setRange(null, null, false);
+  });
+  $('clearRangeFromResults').addEventListener('click', () => {
+    resultsOpen = false;
+    setRange(null, null, false);
+  });
+  $('openRangeTabs').addEventListener('click', openRangeUrls);
+  $('closeResults').addEventListener('click', (e) => {
+    e.stopPropagation();
+    resultsOpen = false;
+    syncUI();
   });
   startInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
@@ -487,6 +701,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       maxProgress: page().maxProgress,
       startWithin: page().startWithin,
       startDates: [...(page().startDates || [])],
+      startFrom: page().startFrom,
+      startTo: page().startTo,
     };
     updatePage({ presets: [...page().presets, preset], activePreset: preset.id });
   });
@@ -515,6 +731,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   $('openStats').addEventListener('click', () => {
     reportOpen = true;
     settingsOpen = false;
+    resultsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
     void paintList(document, false).then(() => renderReport());
@@ -528,6 +745,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     e.stopPropagation();
     settingsOpen = true;
     reportOpen = false;
+    resultsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
     void refreshApiKeyStatus();
@@ -567,12 +785,33 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   $('rescan').addEventListener('click', () => markTickets({ force: true }));
 
   document.addEventListener('click', (e) => {
-    const th = (e.target as Element | null)?.closest?.('th[data-sth-col="start"]');
+    const target = e.target as Element | null;
+    if (target?.closest?.('.sth-range-badge')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!rangeListingEnabled(hasApiKeyPresent())) {
+        expandRangeSection();
+        return;
+      }
+      showResults();
+      return;
+    }
+    const th = target?.closest?.('th[data-sth-col="start"]');
     if (!th) return;
     e.preventDefault();
     e.stopPropagation();
     const nextDir: SortDir = page().sortKey === 'start' && page().sortDir === 'asc' ? 'desc' : 'asc';
     updatePage({ sortKey: 'start', sortDir: nextDir });
+  }, true);
+  document.addEventListener('contextmenu', (e) => {
+    const td = (e.target as Element | null)?.closest?.('td[data-sth-col="start"]') as HTMLElement | null;
+    const key = td?.dataset.startKey;
+    if (!key) return;
+    if (!rangeListingEnabled(hasApiKeyPresent())) return;
+    e.preventDefault();
+    rangeDraft = { startFrom: key, startTo: key };
+    rangeDraftModule = getModuleId();
+    expandRangeSection();
   }, true);
 
   window.addEventListener('resize', () => {
@@ -585,4 +824,5 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   applyPageStyles();
   syncUI();
+  void refreshApiKeyStatus();
 }

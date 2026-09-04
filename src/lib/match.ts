@@ -1,5 +1,5 @@
 // Human: AND/OR matching for idle age, status tags, start dates, progress, and start-within.
-// Agent: PURE. Empty status/start tags are ignored in AND mode (do not require a match).
+// Agent: PURE. Empty status/start tags are ignored in AND mode (do not require a match). Date range is not part of highlight matching.
 
 import type { Matchable, PageSettings } from './types';
 

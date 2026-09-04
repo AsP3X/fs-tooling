@@ -30,6 +30,7 @@ describe('collectRows', () => {
     expect(row.status).toBe('Being Processed');
     expect(row.kind).toBe('Internal');
     expect(row.startKey).toBe('2026-09-14');
+    expect(row.updatedKey).toBe('2026-09-01');
     expect(row.progress.pct).toBe(25);
     expect(row.initiator).toBe('Pat');
     expect(row.href).toContain('/a/tickets/42');

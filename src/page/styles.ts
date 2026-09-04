@@ -46,6 +46,26 @@ export function applyPageStyles(): void {
       th[data-sth-col="start"]:hover { color: ${c}; }
       th[data-sth-col="start"] .sth-sort { margin-left: 6px; opacity: .45; font-size: 11px; }
       th[data-sth-col="start"].sth-on .sth-sort { opacity: 1; color: ${c}; }
+      th[data-sth-col="start"] .sth-range-badge {
+        margin-left: 8px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 650;
+        opacity: .5;
+        cursor: pointer;
+      }
+      th[data-sth-col="start"] .sth-range-badge:hover,
+      th[data-sth-col="start"].sth-filtered .sth-range-badge { opacity: 1; color: ${c}; }
+      th[data-sth-col="start"].sth-range-off .sth-range-badge,
+      th[data-sth-col="start"] .sth-range-badge:disabled {
+        opacity: .35;
+        cursor: default;
+        color: inherit;
+      }
       td[data-sth-col="start"] {
         color: inherit;
         white-space: nowrap;

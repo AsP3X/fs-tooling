@@ -56,4 +56,9 @@ describe('itemMatches', () => {
     expect(itemMatches(item({ idleDays: 1, startIn: -2 }), cfg)).toBe(true);
     expect(itemMatches(item({ idleDays: 1, startIn: 10 }), cfg)).toBe(false);
   });
+
+  it('ignores startFrom/startTo — range is the overlay table, not highlight matching', () => {
+    const cfg = defaultPage({ days: 6, matchMode: 'or', startFrom: '2026-01-01', startTo: '2026-01-02' });
+    expect(itemMatches(item({ idleDays: 10, startKey: '2026-09-14' }), cfg)).toBe(true);
+  });
 });

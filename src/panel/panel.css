@@ -28,6 +28,7 @@
 .toggle i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
 .toggle.on i { left: 21px; }
 .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius: 12px; padding: 8px 10px; display: grid; gap: 8px; }
+[hidden] { display: none !important; }
 .tagbox-head .chev { color: #8b949e; font-size: 10px; width: 12px; text-align: center; }
 .tagbox.open .tagbox-head .chev { transform: rotate(90deg); }
 .days-val { font-size: 26px; font-weight: 700; color: #fff; }
@@ -60,6 +61,8 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 .ghost, .primary { height: 34px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .ghost { border: 1px solid rgba(255,255,255,.08); background: transparent; color: #c5cbd3; }
 .primary { border: 0; color: #fff; background: var(--accent, #e65100); }
+.ghost:disabled, .primary:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
+.card.range-locked { opacity: .72; }
 .report { display: none; width: min(620px, 94vw); max-height: 80vh; overflow: auto; border-radius: 18px; }
 .report.show { display: block; }
 .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -73,5 +76,11 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 .split th { text-align: left; color: #8b949e; }
 .split td.num { text-align: right; }
 .note { font-size: 11px; color: #8b949e; line-height: 1.4; }
+.range-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.range-field { display: grid; gap: 4px; }
+.range-field span { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
+.range-field input[type="date"] { width: 100%; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.05); color: #f2f4f7; padding: 0 8px; font-size: 12px; outline: none; color-scheme: dark; }
+.split a { color: #e8eaed; text-decoration: none; }
+.split a:hover { text-decoration: underline; }
 #featureMount { display: grid; gap: 6px; }
 #featureMount:empty { display: none; }

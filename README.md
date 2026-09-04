@@ -30,11 +30,12 @@ Load unpacked from `dist/sth-extension/`. Full loop: [Local development](docs/lo
 
 - Compact floating panel: settings sections are collapsed by default
 - Tickets: idle highlighting from **Updated**, status tags, AND/OR, saved views
-- Journeys: injected **Start date** column parsed from the title (`Start 14-09-2026`); click the header to sort
+- Date range: from–to on journey **start** or ticket **updated_at** via the API (needs a saved key; click **Apply**); results open in our table (Freshservice’s list is unchanged)
+- Journeys: injected **Start date** column; click the header to sort, **Range** to open results, right-click a date for that day
 - Sort the visible list by Created On, Initiator, Request Status, or child progress
 - Statistics snapshots do **not** store person names
 
-Current version: **2.6.0** (`package.json`).
+Current version: **2.7.0** (`package.json`).
 
 ---
 

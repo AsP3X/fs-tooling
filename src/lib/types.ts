@@ -16,6 +16,8 @@ export interface Preset {
   maxProgress?: number | null;
   startWithin?: number | null;
   startDates?: string[];
+  startFrom?: string | null;
+  startTo?: string | null;
 }
 
 export interface PageSettings {
@@ -30,6 +32,9 @@ export interface PageSettings {
   maxProgress: number | null;
   startWithin: number | null;
   startDates: string[];
+  /** Inclusive YYYY-MM-DD overlay range. Null = unbound. Not used by itemMatches. */
+  startFrom: string | null;
+  startTo: string | null;
   startOpen: boolean;
   sortKey: SortKey;
   sortDir: SortDir;
@@ -64,6 +69,7 @@ export interface RowItem {
   kind: string;
   progress: Progress;
   startKey: string | null;
+  updatedKey: string | null;
   initiator: string;
   ord: number;
   label: string;
@@ -75,6 +81,7 @@ export interface Matchable {
   status: string;
   idleDays: number | null;
   startKey: string | null;
+  updatedKey?: string | null;
   startIn: number | null;
   progress: { pct: number | null };
 }
@@ -109,7 +116,10 @@ export interface Reportable {
   status: string;
   idleDays: number | null;
   startKey: string | null;
+  updatedKey?: string | null;
   startIn: number | null;
   progress: { pct: number | null };
   kind: string;
+  href?: string | null;
+  label?: string;
 }

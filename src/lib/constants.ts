@@ -62,6 +62,8 @@ export function defaultPage(overrides: Partial<PageSettings> = {}): PageSettings
     maxProgress: null,
     startWithin: null,
     startDates: [],
+    startFrom: null,
+    startTo: null,
     startOpen: false,
     sortKey: 'default',
     sortDir: 'asc',

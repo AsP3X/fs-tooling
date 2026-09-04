@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { progressFromChildTickets, startFromCustomFields } from './journeys';
+import { journeyToReportable, progressFromChildTickets, startFromCustomFields } from './journeys';
 
 describe('startFromCustomFields', () => {
   it('prefers a start/date field', () => {
@@ -9,6 +9,17 @@ describe('startFromCustomFields', () => {
 
   it('ignores user objects', () => {
     expect(startFromCustomFields({ cf_agents_dd: { id: 1, name: 'Pat' } })).toBeNull();
+  });
+});
+
+describe('journeyToReportable', () => {
+  it('falls back to Start DD-MM-YYYY in the title when custom fields have no date', () => {
+    const rec = journeyToReportable(
+      { id: 9, title: 'Onboarding - Start 14-09-2026 (Internal employee)' },
+      Date.UTC(2026, 8, 1),
+    );
+    expect(rec.startKey).toBe('2026-09-14');
+    expect(rec.label).toContain('Onboarding');
   });
 });
 

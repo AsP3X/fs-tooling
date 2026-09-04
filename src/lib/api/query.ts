@@ -2,6 +2,7 @@
 // Agent: PURE. Date operator :< is inclusive LTE per FS docs. Unknown status names are dropped.
 
 import { MS_DAY } from '../constants';
+import { normalizeRange, shiftDateKey } from '../range';
 import type { PageSettings } from '../types';
 
 export function idleCutoffDate(days: number, now: number = Date.now()): string {
@@ -26,6 +27,19 @@ export function buildTicketFilterQuery(
     return statusPart ? `(${statusPart}) AND ${idle}` : idle;
   }
   return statusPart ? `${statusPart} OR ${idle}` : idle;
+}
+
+// Human: Inclusive calendar from–to on updated_at. `:<` is LTE of that timestamp, so To is bumped one UTC day.
+// Agent: PURE. Client-side inDateRange still drops any extra day the API includes.
+export function buildUpdatedRangeQuery(from: unknown, to: unknown): string {
+  const { startFrom, startTo } = normalizeRange(from, to);
+  const parts: string[] = [];
+  if (startFrom) parts.push(`updated_at:>'${startFrom}'`);
+  if (startTo) {
+    const end = shiftDateKey(startTo, 1) || startTo;
+    parts.push(`updated_at:<'${end}'`);
+  }
+  return parts.join(' AND ');
 }
 
 export function chunkIds(ids: number[], maxChars: number = 480): number[][] {

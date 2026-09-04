@@ -10,6 +10,9 @@ let lastStats: ListStats = { tickets: 0, marked: 0, extraMarked: 0, fromApi: fal
 let lastMarkedUrls: string[] = [];
 let lastReportables: Reportable[] = [];
 let lastReportMeta = { truncated: false, fromApi: false };
+let lastRangeResults: Reportable[] = [];
+let lastRangeMeta = { truncated: false, fromApi: false };
+let apiKeyPresent = false;
 
 export function getSettings(): Settings {
   if (!settings) settings = loadSettings();
@@ -75,4 +78,27 @@ export function setLastReportables(items: Reportable[], meta: { truncated: boole
 
 export function getLastReportMeta(): { truncated: boolean; fromApi: boolean } {
   return lastReportMeta;
+}
+
+// Human: Rows for the date-range overlay. Independent of lastReportables (statistics).
+export function getLastRangeResults(): Reportable[] {
+  return lastRangeResults;
+}
+
+export function setLastRangeResults(items: Reportable[], meta: { truncated: boolean; fromApi: boolean }): void {
+  lastRangeResults = items;
+  lastRangeMeta = meta;
+}
+
+export function getLastRangeMeta(): { truncated: boolean; fromApi: boolean } {
+  return lastRangeMeta;
+}
+
+// Human: Whether a Freshservice API key is saved. Never stores the key itself.
+export function hasApiKeyPresent(): boolean {
+  return apiKeyPresent;
+}
+
+export function setApiKeyPresent(present: boolean): void {
+  apiKeyPresent = !!present;
 }
