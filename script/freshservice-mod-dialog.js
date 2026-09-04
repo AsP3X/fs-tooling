@@ -1,11 +1,10 @@
 // ==UserScript==
-// @name         Freshservice Stale Tickets
+// @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      1.4
-// @description  Highlight stale Freshservice tickets and open them in tabs
+// @version      2.1.0
+// @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
-// @match        *://*/a/tickets*
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -16,14 +15,16 @@
   const STYLE_ID = `${NS}-page-style`;
   const ROW_MARK = `${NS}-row`;
   const CELL_MARK = `${NS}-cell`;
-  const ROW_SEL = 'tr.et-tr';
-  const DATE_SEL = 'td[data-name="updated_at_date"] [data-test-id="date-cell"]';
-  const CREATED_SEL = 'td[data-name="created_at_date"] [data-test-id="date-cell"]';
-  const TICKET_LINK_SEL = 'a.subject-cell[href], a[href*="/tickets/"]';
-  const STORAGE_KEY = `${NS}-settings`;
-  const HISTORY_KEY = `${NS}-history`;
-  const MS_DAY = 24 * 60 * 60 * 1000;
+  const STORAGE_KEY = `${NS}-settings-v2`;
+  const HISTORY_KEY = `${NS}-history-v2`;
+  const MS_DAY = 86400000;
   const MAX_SNAPS = 90;
+
+  const MONTHS = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+  };
+
   const BUCKETS = [
     { key: '<1d', test: (d) => d < 1 },
     { key: '1–3d', test: (d) => d >= 1 && d < 3 },
@@ -32,28 +33,78 @@
     { key: '14d+', test: (d) => d >= 14 }
   ];
 
-  const DEFAULTS = {
+  const PROG_BUCKETS = [
+    { key: '0%', test: (p) => p === 0 },
+    { key: '1–25%', test: (p) => p > 0 && p < 25 },
+    { key: '25–50%', test: (p) => p >= 25 && p < 50 },
+    { key: '50–75%', test: (p) => p >= 50 && p < 75 },
+    { key: '75–99%', test: (p) => p >= 75 && p < 100 },
+    { key: '100%', test: (p) => p >= 100 }
+  ];
+
+  const TICKET_PRESETS = [
+    { id: 'idle-6', name: 'Idle 6d', days: 6, statuses: [], matchMode: 'or' },
+    { id: 'open-idle', name: 'Open + idle', days: 6, statuses: ['Open'], matchMode: 'and' },
+    { id: 'pending-3', name: 'Pending 3d', days: 3, statuses: ['Pending'], matchMode: 'and' },
+    { id: 'w3p', name: '3rd party', days: 3, statuses: ['Waiting for third party'], matchMode: 'and' }
+  ];
+
+  const JOURNEY_PRESETS = [
+    { id: 'await-3', name: 'Awaiting 3d', days: 3, statuses: ['Awaiting Information'], matchMode: 'and' },
+    { id: 'proc-14', name: 'Processing 14d', days: 14, statuses: ['Being Processed'], matchMode: 'and' },
+    { id: 'low-prog', name: 'Low progress', days: 7, statuses: [], matchMode: 'or', maxProgress: 40 },
+    { id: 'start-soon', name: 'Start ≤7d', days: 1, statuses: [], matchMode: 'or', startWithin: 7 }
+  ];
+
+  const PAGE_DEFAULT = {
     days: 6,
     color: '#e65100',
     enabled: true,
-    collapsed: false,
     statuses: [],
     statusOpen: false,
+    matchMode: 'or',
+    presets: [],
+    activePreset: null,
+    maxProgress: null,
+    startWithin: null,
+    startDates: [],
+    startOpen: false,
+    sortKey: 'default',
+    sortDir: 'asc'
+  };
+
+  const DEFAULTS = {
+    module: 'auto',
+    collapsed: false,
     x: null,
-    y: null
+    y: null,
+    tickets: { ...PAGE_DEFAULT },
+    journeys: { ...PAGE_DEFAULT, days: 7, color: '#1565c0' }
   };
 
   const loadSettings = () => {
     try {
-      return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') };
+      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      return {
+        ...DEFAULTS,
+        ...raw,
+        tickets: { ...DEFAULTS.tickets, ...(raw.tickets || {}) },
+        journeys: { ...DEFAULTS.journeys, ...(raw.journeys || {}) }
+      };
     } catch {
-      return { ...DEFAULTS };
+      return JSON.parse(JSON.stringify(DEFAULTS));
     }
   };
   const saveSettings = (s) => localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   let settings = loadSettings();
-  if (!Array.isArray(settings.statuses)) settings.statuses = [];
-  if (settings.statusOpen == null) settings.statusOpen = false;
+  ['tickets', 'journeys'].forEach((k) => {
+    if (!Array.isArray(settings[k].statuses)) settings[k].statuses = [];
+    if (!Array.isArray(settings[k].presets)) settings[k].presets = [];
+    if (!Array.isArray(settings[k].startDates)) settings[k].startDates = [];
+    if (settings[k].matchMode !== 'and') settings[k].matchMode = 'or';
+    if (!settings[k].sortKey) settings[k].sortKey = 'default';
+    if (settings[k].sortDir !== 'desc') settings[k].sortDir = 'asc';
+  });
 
   document.getElementById(HOST_ID)?.remove();
   document.getElementById(STYLE_ID)?.remove();
@@ -64,32 +115,9 @@
   document.head.appendChild(pageStyle);
 
   const hexToRgba = (hex, a) => {
-    const h = hex.replace('#', '');
+    const h = String(hex || '#e65100').replace('#', '');
     const n = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
     return `rgba(${parseInt(n.slice(0, 2), 16)}, ${parseInt(n.slice(2, 4), 16)}, ${parseInt(n.slice(4, 6), 16)}, ${a})`;
-  };
-
-  const applyPageStyles = () => {
-    const c = settings.color;
-    pageStyle.textContent = `
-      .${ROW_MARK} {
-        background-color: ${hexToRgba(c, 0.18)} !important;
-        box-shadow: inset 4px 0 0 ${c} !important;
-      }
-      .${ROW_MARK} > td {
-        background-color: ${hexToRgba(c, 0.18)} !important;
-      }
-      .${CELL_MARK} {
-        background-color: ${hexToRgba(c, 0.35)} !important;
-        outline: 2px solid ${c} !important;
-        border-radius: 3px;
-      }
-    `;
-  };
-
-  const MONTHS = {
-    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
   };
 
   function parseTicketDate(raw) {
@@ -99,45 +127,276 @@
     if (m && MONTHS[m[2].toLowerCase()] != null) {
       return new Date(+m[3], MONTHS[m[2].toLowerCase()], +m[1], +(m[4] || 0), +(m[5] || 0));
     }
-    m = str.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
-    if (m) return new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0));
+    m = str.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
+    if (m) {
+      const d = +m[1];
+      const mo = +m[2];
+      return new Date(+m[3], mo - 1, d, +(m[4] || 0), +(m[5] || 0));
+    }
     const native = new Date(str.replace(/,/g, ''));
     return Number.isNaN(native.getTime()) ? null : native;
   }
 
-  function ticketHref(row) {
-    const a = row.querySelector(TICKET_LINK_SEL);
-    if (!a) return null;
-    try {
-      return new URL(a.getAttribute('href'), location.origin).href;
-    } catch {
-      return null;
-    }
+  function dateKey(d) {
+    if (!d || Number.isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
 
-  function rowStatus(row) {
-    const el = row.querySelector('.status-result, td[data-name="status"] [title]');
+  function formatStart(key) {
+    const m = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : key;
+  }
+
+  function parseStartDate(title) {
+    const m = String(title || '').match(/Start\s+(\d{1,2})[./-](\d{1,2})[./-](\d{4})/i);
+    if (!m) return null;
+    return new Date(+m[3], +m[2] - 1, +m[1]);
+  }
+
+  function parseStartInput(raw) {
+    const str = String(raw || '').replace(/^start\s+/i, '').replace(/\s+/g, ' ').trim();
+    if (!str) return null;
+    let m = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+    if (m) return dateKey(new Date(+m[3], +m[2] - 1, +m[1]));
+    m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return dateKey(new Date(+m[1], +m[2] - 1, +m[3]));
+    m = str.match(/^(\d{1,2})\s+([A-Za-z]{3})\.?\s+(\d{4})$/);
+    if (m && MONTHS[m[2].toLowerCase()] != null) return dateKey(new Date(+m[3], MONTHS[m[2].toLowerCase()], +m[1]));
+    return dateKey(parseStartDate('Start ' + str));
+  }
+
+  function employeeKind(title) {
+    const m = String(title || '').match(/\((Internal|External)\s+employee\)/i);
+    return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : '—';
+  }
+
+  function sanitizeTitle(title) {
+    return String(title || '')
+      .replace(/Employee Onboarding Request\s*-\s*[^-]+-\s*/i, 'Onboarding · ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function detectModule() {
+    if (settings.module === 'tickets' || settings.module === 'journeys') return settings.module;
+    const journeyHeader = document.querySelector('th[data-name="initiator"], th[data-name="child_ticket_progress"], td[data-name="child_ticket_progress"]');
+    const path = `${location.pathname} ${location.href}`;
+    if (journeyHeader || /employee_onboarding|\/journeys|onboarding/i.test(path)) return 'journeys';
+    return 'tickets';
+  }
+
+  let moduleId = detectModule();
+  const page = () => settings[moduleId] || settings.tickets;
+
+  function applyPageStyles() {
+    const c = page().color;
+    pageStyle.textContent = `
+      .${ROW_MARK} {
+        background-color: ${hexToRgba(c, 0.18)} !important;
+        box-shadow: inset 4px 0 0 ${c} !important;
+      }
+      .${ROW_MARK} > td { background-color: ${hexToRgba(c, 0.18)} !important; }
+      .${CELL_MARK} {
+        background-color: ${hexToRgba(c, 0.35)} !important;
+        outline: 2px solid ${c} !important;
+        border-radius: 3px;
+      }
+      th[data-sth-col="start"], td[data-sth-col="start"] {
+        width: 148px !important;
+        min-width: 148px !important;
+        max-width: 148px !important;
+        box-sizing: border-box;
+        vertical-align: middle;
+        padding: 8px 12px !important;
+        font-size: 13px;
+      }
+      th[data-sth-col="start"] {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        cursor: pointer;
+        user-select: none;
+        font-weight: 650;
+        background: inherit !important;
+        border-bottom: 1px solid var(--color-boundary-border-0-3, rgba(0,0,0,.08));
+      }
+      th[data-sth-col="start"]:hover { color: ${c}; }
+      th[data-sth-col="start"] .sth-sort { margin-left: 6px; opacity: .45; font-size: 11px; }
+      th[data-sth-col="start"].sth-on .sth-sort { opacity: 1; color: ${c}; }
+      td[data-sth-col="start"] {
+        color: inherit;
+        white-space: nowrap;
+      }
+      td[data-sth-col="start"] .sth-empty { opacity: .35; }
+    `;
+  }
+
+  function prettyStart(d) {
+    if (!d || Number.isNaN(d.getTime())) return null;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${String(d.getDate()).padStart(2, '0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  }
+
+  function removeStartColumn() {
+    document.querySelectorAll('[data-sth-col="start"]').forEach((el) => el.remove());
+  }
+
+  function injectStartColumn(items) {
+    if (moduleId !== 'journeys') {
+      removeStartColumn();
+      return;
+    }
+    const subjectTh = document.querySelector('thead th[data-name="subject"]');
+    if (!subjectTh) return;
+    let th = document.querySelector('thead th[data-sth-col="start"]');
+    if (!th) {
+      th = document.createElement('th');
+      th.dataset.sthCol = 'start';
+      th.className = 'ember-view ellipsis is-resizable sth-start-header';
+      th.setAttribute('role', 'columnheader');
+      subjectTh.after(th);
+    }
+    const cfg = page();
+    const on = cfg.sortKey === 'start';
+    th.classList.toggle('sth-on', on);
+    th.innerHTML = `Start date<span class="sth-sort">${on ? (cfg.sortDir === 'desc' ? '↓' : '↑') : '↕'}</span>`;
+    th.title = 'Sort by start date from the request title';
+    items.forEach((item) => {
+      const subjectTd = item.row.querySelector('td[data-name="subject"]');
+      if (!subjectTd) return;
+      let td = item.row.querySelector('td[data-sth-col="start"]');
+      if (!td) {
+        td = document.createElement('td');
+        td.dataset.sthCol = 'start';
+        td.className = 'ember-view sth-start-cell';
+        subjectTd.after(td);
+      }
+      const label = prettyStart(item.start);
+      td.innerHTML = label
+        ? `<span title="Start ${formatStart(item.startKey)}">${label}</span>`
+        : '<span class="sth-empty">—</span>';
+    });
+  }
+
+  function cellText(row, sel) {
+    const el = row.querySelector(sel);
     return String(el?.getAttribute('title') || el?.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
-  function statusWanted(row) {
-    const tags = (settings.statuses || []).map((s) => s.toLowerCase());
-    if (!tags.length) return false;
-    return tags.includes(rowStatus(row).toLowerCase());
+  function ticketHref(row) {
+    const a = row.querySelector('a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"]');
+    if (!a) return null;
+    try { return new URL(a.getAttribute('href'), location.origin).href; } catch { return null; }
   }
 
-  function collectStaleRows() {
+  function rowStatus(row) {
+    const badge = row.querySelector('[data-test-id="state-cell"] span, .status-result, td[data-name="status"] [title]');
+    if (badge) return String(badge.getAttribute('title') || badge.textContent || '').replace(/\s+/g, ' ').trim();
+    return '';
+  }
+
+  function rowStatusAge(row) {
+    const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
+    const label = trigger?.getAttribute('aria-label') || '';
+    const m = label.match(/since\s+(\d+)\s+days?/i);
+    return m ? Number(m[1]) : null;
+  }
+
+  function rowProgress(row) {
+    const raw = row.querySelector('.progress-counts')?.textContent || '';
+    const m = raw.match(/(\d+)\s*\/\s*(\d+)/);
+    if (!m) return { done: null, total: null, pct: null };
+    const done = +m[1];
+    const total = +m[2];
+    return { done, total, pct: total ? (done / total) * 100 : null };
+  }
+
+  function initiatorName(row) {
+    const el = row.querySelector('.requester-cell-name, td[data-name="initiator"] a, td[data-name="initiator"]');
+    return String(el?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function rowTbody(row) {
+    return row.closest('tbody');
+  }
+
+  function collectRows() {
     const now = Date.now();
     const out = [];
-    document.querySelectorAll(ROW_SEL).forEach((row) => {
-      const cell = row.querySelector(DATE_SEL);
-      const date = cell ? parseTicketDate(cell.getAttribute('title') || cell.textContent) : null;
-      const stale = !!(date && (now - date.getTime()) / MS_DAY >= settings.days);
-      const byStatus = statusWanted(row);
-      if (!stale && !byStatus) return;
-      out.push({ row, cell, href: ticketHref(row), date, stale, byStatus });
+    document.querySelectorAll('tr.et-tr').forEach((row, idx) => {
+      if (row.closest('thead')) return;
+      if (!row.dataset.sthOrd) row.dataset.sthOrd = String(idx);
+      const updatedEl = row.querySelector('td[data-name="updated_at_date"] [data-test-id="date-cell"]');
+      const createdEl = row.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
+      const titleEl = row.querySelector('td[data-name="subject"] [title], td[data-name="ticket_subject"] [title], a.subject-cell [title]');
+      const title = titleEl?.getAttribute('title') || cellText(row, 'a.subject-cell');
+      const updated = parseTicketDate(updatedEl?.getAttribute('title') || updatedEl?.textContent);
+      const created = parseTicketDate(createdEl?.getAttribute('title') || createdEl?.textContent);
+      const statusAge = rowStatusAge(row);
+      const start = parseStartDate(title);
+      const progress = rowProgress(row);
+      const idleDays = statusAge != null
+        ? statusAge
+        : updated
+          ? (now - updated.getTime()) / MS_DAY
+          : created
+            ? (now - created.getTime()) / MS_DAY
+            : null;
+      const startIn = start ? (start.getTime() - now) / MS_DAY : null;
+      out.push({
+        row,
+        cell: updatedEl || createdEl,
+        href: ticketHref(row),
+        status: rowStatus(row) || '—',
+        idleDays,
+        created,
+        updated,
+        start,
+        startIn,
+        kind: employeeKind(title),
+        progress,
+        startKey: dateKey(start),
+        initiator: initiatorName(row),
+        ord: Number(row.dataset.sthOrd || idx),
+        label: sanitizeTitle(title)
+      });
     });
     return out;
+  }
+
+  function statusWanted(item) {
+    const tags = (page().statuses || []).map((s) => s.toLowerCase());
+    if (!tags.length) return false;
+    return tags.includes(String(item.status).toLowerCase());
+  }
+
+  function startWanted(item) {
+    const tags = page().startDates || [];
+    if (!tags.length) return false;
+    return !!(item.startKey && tags.includes(item.startKey));
+  }
+
+  function itemMatches(item) {
+    const cfg = page();
+    const stale = item.idleDays != null && item.idleDays >= cfg.days;
+    const byStatus = statusWanted(item);
+    const byStart = startWanted(item);
+    const andMode = cfg.matchMode === 'and';
+    let match = andMode
+      ? (stale && (!cfg.statuses.length || byStatus) && (!cfg.startDates.length || byStart))
+      : (stale || byStatus || byStart);
+    if (cfg.maxProgress != null && item.progress.pct != null) {
+      const low = item.progress.pct <= cfg.maxProgress;
+      match = andMode ? (match && low) : (match || low);
+    }
+    if (cfg.startWithin != null && item.startIn != null) {
+      const soon = item.startIn <= cfg.startWithin;
+      match = andMode ? (match && soon) : (match || soon);
+    }
+    return match;
   }
 
   function clearMarks() {
@@ -151,93 +410,116 @@
   let lastStats = { tickets: 0, marked: 0 };
 
   function markTickets() {
+    moduleId = detectModule();
     clearMarks();
-    const rows = document.querySelectorAll(ROW_SEL);
-    const stale = collectStaleRows();
-    if (settings.enabled) {
-      const now = Date.now();
-      stale.forEach(({ row, cell, date, byStatus }) => {
-        row.classList.add(ROW_MARK);
-        if (date) row.dataset.staleDays = String(Math.floor((now - date.getTime()) / MS_DAY));
-        if (byStatus) row.dataset.statusMark = rowStatus(row);
-        if (cell) cell.classList.add(CELL_MARK);
+    const items = collectRows();
+    const hits = items.filter(itemMatches);
+    if (page().enabled) {
+      hits.forEach((item) => {
+        item.row.classList.add(ROW_MARK);
+        if (item.idleDays != null) item.row.dataset.staleDays = String(Math.floor(item.idleDays));
+        if (item.cell) item.cell.classList.add(CELL_MARK);
       });
     }
-    lastStats = { tickets: rows.length, marked: stale.length };
+    lastStats = { tickets: items.length, marked: hits.length };
+    injectStartColumn(items);
+    sortTableRows(items);
     renderStats();
   }
 
-  function cellText(row, sel) {
-    const el = row.querySelector(sel);
-    return String(el?.getAttribute('title') || el?.textContent || '').replace(/\s+/g, ' ').trim();
+  function sortValue(item, key) {
+    if (key === 'start') return item.start ? item.start.getTime() : null;
+    if (key === 'created') return item.created ? item.created.getTime() : null;
+    if (key === 'status') return (item.status || '').toLowerCase();
+    if (key === 'initiator') return (item.initiator || '').toLowerCase();
+    if (key === 'progress') return item.progress.pct == null ? null : item.progress.pct;
+    return item.ord;
   }
 
-  function collectAllTickets() {
-    const now = Date.now();
-    return [...document.querySelectorAll(ROW_SEL)].map((row) => {
-      const updated = parseTicketDate(cellText(row, DATE_SEL));
-      const created = parseTicketDate(cellText(row, CREATED_SEL));
-      return {
-        status: rowStatus(row) || '—',
-        priority: cellText(row, '.priority-result, td[data-name="priority"] [title]') || '—',
-        owner: cellText(row, '.group-agent-result, td[data-name="assigned_to"]') || '—',
-        idle: updated ? Math.max(0, (now - updated.getTime()) / MS_DAY) : null,
-        cycle: created && updated ? Math.max(0, (updated.getTime() - created.getTime()) / MS_DAY) : null
-      };
+  function sortTableRows(items) {
+    const cfg = page();
+    const key = cfg.sortKey || 'default';
+    const dir = cfg.sortDir === 'desc' ? -1 : 1;
+    const groups = new Map();
+    items.forEach((item) => {
+      const body = rowTbody(item.row);
+      if (!body) return;
+      if (!groups.has(body)) groups.set(body, []);
+      groups.get(body).push(item);
+    });
+    groups.forEach((list, body) => {
+      list.sort((a, b) => {
+        if (key === 'default') return (a.ord - b.ord);
+        const va = sortValue(a, key);
+        const vb = sortValue(b, key);
+        if (va == null && vb == null) return a.ord - b.ord;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (typeof va === 'string') {
+          const cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' });
+          return cmp ? cmp * dir : a.ord - b.ord;
+        }
+        if (va === vb) return a.ord - b.ord;
+        return va < vb ? -1 * dir : 1 * dir;
+      });
+      const occ = [...body.querySelectorAll('occluded-content')];
+      list.forEach((item) => body.appendChild(item.row));
+      occ.forEach((el) => body.appendChild(el));
     });
   }
 
   function summarize(values) {
-    const xs = values.filter((n) => n != null && Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
+    const xs = values.filter((n) => n != null && Number.isFinite(n)).sort((a, b) => a - b);
     if (!xs.length) return { n: 0, avg: null, med: null, p90: null };
     const sum = xs.reduce((a, b) => a + b, 0);
     const at = (p) => xs[Math.min(xs.length - 1, Math.max(0, Math.ceil((p / 100) * xs.length) - 1))];
     return { n: xs.length, avg: sum / xs.length, med: xs[Math.floor((xs.length - 1) / 2)], p90: at(90) };
   }
 
-  function bucketize(values) {
-    const xs = values.filter((n) => n != null && Number.isFinite(n) && n >= 0);
-    return BUCKETS.map((b) => ({ key: b.key, n: xs.filter(b.test).length }));
+  function bucketize(values, buckets) {
+    const xs = values.filter((n) => n != null && Number.isFinite(n));
+    return buckets.map((b) => ({ key: b.key, n: xs.filter(b.test).length }));
   }
 
-  function groupBy(rows, key, metric) {
+  function groupCount(items, key) {
     const map = new Map();
-    rows.forEach((r) => {
+    items.forEach((r) => {
       const k = r[key] || '—';
-      if (!map.has(k)) map.set(k, []);
-      map.get(k).push(r[metric]);
+      map.set(k, (map.get(k) || 0) + 1);
     });
-    return [...map.entries()]
-      .map(([name, vals]) => ({ name, ...summarize(vals) }))
-      .sort((a, b) => b.n - a.n);
+    return [...map.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
   }
 
   function fmtDur(d) {
     if (d == null || !Number.isFinite(d)) return '—';
-    if (d < 1 / 24) return `${Math.max(1, Math.round(d * 24 * 60))}m`;
-    if (d < 2) {
-      const h = d * 24;
-      return `${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
+    if (Math.abs(d) < 1 / 24) return `${Math.max(1, Math.round(Math.abs(d) * 1440))}m`;
+    if (Math.abs(d) < 2) {
+      const h = Math.abs(d) * 24;
+      return `${d < 0 ? '−' : ''}${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
     }
-    return `${d < 10 ? d.toFixed(1) : Math.round(d)}d`;
+    const v = Math.abs(d);
+    return `${d < 0 ? '−' : ''}${v < 10 ? v.toFixed(1) : Math.round(v)}d`;
   }
 
   function buildReport() {
-    const rows = collectAllTickets();
-    const idle = rows.map((r) => r.idle);
-    const cycle = rows.map((r) => r.cycle);
+    const items = collectRows();
+    const idle = items.map((r) => r.idleDays);
+    const prog = items.map((r) => r.progress.pct);
+    const startIn = items.map((r) => r.startIn);
     return {
-      n: rows.length,
+      module: moduleId,
+      n: items.length,
       idle: summarize(idle),
-      cycle: summarize(cycle),
-      idleBuckets: bucketize(idle),
-      cycleBuckets: bucketize(cycle),
-      byStatusIdle: groupBy(rows, 'status', 'idle'),
-      byStatusCycle: groupBy(rows, 'status', 'cycle'),
-      byPriorityIdle: groupBy(rows, 'priority', 'idle'),
-      byPriorityCycle: groupBy(rows, 'priority', 'cycle'),
-      byOwnerIdle: groupBy(rows, 'owner', 'idle'),
-      byOwnerCycle: groupBy(rows, 'owner', 'cycle')
+      progress: summarize(prog),
+      startIn: summarize(startIn),
+      idleBuckets: bucketize(idle.filter((n) => n != null && n >= 0), BUCKETS),
+      progBuckets: bucketize(prog, PROG_BUCKETS),
+      byStatus: groupCount(items, 'status'),
+      byKind: groupCount(items, 'kind'),
+      awaiting: items.filter((r) => /await/i.test(r.status)).length,
+      processing: items.filter((r) => /process/i.test(r.status)).length,
+      startPast: items.filter((r) => r.startIn != null && r.startIn < 0).length,
+      startWeek: items.filter((r) => r.startIn != null && r.startIn >= 0 && r.startIn <= 7).length
     };
   }
 
@@ -245,9 +527,7 @@
     try {
       const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
       return Array.isArray(h) ? h : [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
   function saveSnapshot() {
@@ -255,33 +535,26 @@
     const hist = loadHistory();
     hist.push({
       t: Date.now(),
+      module: r.module,
       n: r.n,
       idleAvg: r.idle.avg,
-      cycleAvg: r.cycle.avg,
-      idleP90: r.idle.p90,
-      cycleP90: r.cycle.p90
+      progAvg: r.progress.avg,
+      awaiting: r.awaiting,
+      processing: r.processing
     });
     while (hist.length > MAX_SNAPS) hist.shift();
     localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
     return hist;
   }
 
-  function openStaleTickets() {
+  function openMarked() {
     markTickets();
-    const urls = [...new Set(collectStaleRows().map((x) => x.href).filter(Boolean))];
-    if (!urls.length) {
-      console.log('[stale-tickets] no stale ticket links on this page');
-      return;
-    }
-    if (urls.length > 8 && !confirm(`Open ${urls.length} stale tickets in new tabs?`)) return;
+    const urls = [...new Set(collectRows().filter(itemMatches).map((x) => x.href).filter(Boolean))];
+    if (!urls.length) return;
+    if (urls.length > 8 && !confirm(`Open ${urls.length} marked items in new tabs?`)) return;
     let opened = 0;
-    urls.forEach((url) => {
-      const win = window.open(url, '_blank', 'noopener');
-      if (win) opened += 1;
-    });
-    if (opened < urls.length) {
-      alert(`Opened ${opened} of ${urls.length} tabs. Allow pop-ups for this site to open the rest.`);
-    }
+    urls.forEach((url) => { if (window.open(url, '_blank', 'noopener')) opened += 1; });
+    if (opened < urls.length) alert(`Opened ${opened} of ${urls.length} tabs. Allow pop-ups for this site.`);
   }
 
   const host = document.createElement('div');
@@ -294,305 +567,175 @@
     <style>
       :host { all: initial; }
       * { box-sizing: border-box; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
-
       .fab, .panel {
         color: #e8eaed;
         background: linear-gradient(180deg, rgba(28,32,38,.92), rgba(18,20,24,.94));
         border: 1px solid rgba(255,255,255,.10);
-        box-shadow: 0 18px 50px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.04) inset;
+        box-shadow: 0 18px 50px rgba(0,0,0,.35);
         backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
       }
-
-      .fab {
-        display: none; align-items: center; gap: 8px; height: 44px;
-        padding: 0 14px 0 8px; border-radius: 999px;
-        cursor: grab; user-select: none;
-      }
+      .fab { display: none; align-items: center; gap: 8px; height: 44px; padding: 0 14px 0 8px; border-radius: 999px; cursor: grab; user-select: none; }
       .fab.show { display: flex; }
-      .fab:active, .fab.dragging { cursor: grabbing; }
-      .fab .dot {
-        width: 28px; height: 28px; border-radius: 50%;
-        display: grid; place-items: center; pointer-events: none;
-        background: var(--accent, #e65100); color: #fff; font-size: 12px; font-weight: 700;
-      }
+      .fab .dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent, #e65100); color: #fff; font-size: 12px; font-weight: 700; pointer-events: none; }
       .fab .label { font-size: 13px; font-weight: 600; pointer-events: none; }
-
-      .panel { width: 288px; border-radius: 18px; overflow: hidden; }
+      .panel { width: 320px; border-radius: 18px; overflow: hidden; }
       .panel.hide { display: none; }
-      .panel.dragging, .fab.dragging { opacity: .92; }
-
-      .head {
-        display: flex; align-items: center; gap: 10px;
-        padding: 14px 14px 12px;
-        border-bottom: 1px solid rgba(255,255,255,.07);
-        cursor: grab; user-select: none;
-      }
-      .head:active { cursor: grabbing; }
-      .logo {
-        width: 32px; height: 32px; border-radius: 9px;
-        display: grid; place-items: center; pointer-events: none;
-        background: var(--accent, #e65100); color: #fff; flex: 0 0 auto;
-      }
+      .head { display: flex; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid rgba(255,255,255,.07); cursor: grab; user-select: none; }
+      .logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent, #e65100); color: #fff; flex: 0 0 auto; pointer-events: none; }
       .titles { flex: 1; min-width: 0; pointer-events: none; }
-      .titles h1 { margin: 0; font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; }
+      .titles h1 { margin: 0; font-size: 13.5px; font-weight: 650; }
       .titles p { margin: 2px 0 0; font-size: 11px; color: #9aa3ad; }
-      .grip { color: #6b7380; display: grid; place-items: center; pointer-events: none; }
-      .icon-btn {
-        width: 28px; height: 28px; border: 0; border-radius: 8px;
-        background: transparent; color: #9aa3ad; cursor: pointer;
-        display: grid; place-items: center;
-      }
+      .icon-btn { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: #9aa3ad; cursor: pointer; display: grid; place-items: center; }
       .icon-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
-
-      .body { padding: 14px; display: grid; gap: 14px; }
+      .body { padding: 14px; display: grid; gap: 12px; }
       .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
-
-      .toggle {
-        width: 42px; height: 24px; border-radius: 999px; border: 0;
-        background: #3a4048; position: relative; cursor: pointer; padding: 0;
-      }
+      .toggle { width: 42px; height: 24px; border-radius: 999px; border: 0; background: #3a4048; position: relative; cursor: pointer; padding: 0; }
       .toggle.on { background: var(--accent, #e65100); }
-      .toggle i {
-        position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
-        background: #fff; transition: left .16s ease; box-shadow: 0 1px 4px rgba(0,0,0,.3);
-      }
+      .toggle i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
       .toggle.on i { left: 21px; }
-
-      .days-card {
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.06);
-        border-radius: 14px; padding: 12px;
-      }
-      .days-top { display: flex; align-items: baseline; justify-content: space-between; }
-      .days-val { font-size: 28px; font-weight: 700; letter-spacing: -.03em; line-height: 1; color: #fff; }
+      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
+      .days-val { font-size: 26px; font-weight: 700; color: #fff; }
       .days-val span { font-size: 13px; font-weight: 600; color: #9aa3ad; margin-left: 4px; }
-
-      input[type="range"] {
-        -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 14px 0 8px;
-        background: linear-gradient(90deg, var(--accent) var(--p, 20%), #3a4048 var(--p, 20%));
-        border-radius: 99px; outline: none;
-      }
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-        background: #fff; border: 3px solid var(--accent, #e65100); cursor: pointer;
-      }
-
-      .presets { display: flex; gap: 6px; }
-      .chip {
-        flex: 1; height: 28px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.03); color: #c5cbd3; font-size: 11px; font-weight: 650; cursor: pointer;
-      }
-      .chip:hover { background: rgba(255,255,255,.07); }
-      .chip.on {
-        background: color-mix(in srgb, var(--accent) 22%, transparent);
-        border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-        color: #fff;
-      }
-
-      .tagbox {
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.06);
-        border-radius: 14px; padding: 10px;
-      }
-      .tagbox-head {
-        width: 100%; display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0;
-      }
-      .tagbox-head .chevron { color: #8b949e; transition: transform .16s ease; }
-      .tagbox.open .chevron { transform: rotate(180deg); }
-      .tagbox-body { display: none; margin-top: 8px; }
-      .tagbox.open .tagbox-body { display: block; }
-      .tag-count {
-        font-size: 10px; font-weight: 700; color: #9aa3ad;
-        background: rgba(255,255,255,.06); border-radius: 999px; padding: 2px 7px;
-      }
+      input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: linear-gradient(90deg, var(--accent) var(--p, 20%), #3a4048 var(--p, 20%)); border-radius: 99px; outline: none; }
+      input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid var(--accent, #e65100); }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); color: #c5cbd3; font-size: 11px; font-weight: 650; cursor: pointer; }
+      .chip.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: #fff; }
+      .seg { display: flex; padding: 2px; border-radius: 9px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+      .seg button { height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: #9aa3ad; font-size: 11px; font-weight: 650; cursor: pointer; }
+      .seg button.on { background: var(--accent, #e65100); color: #fff; }
+      .hint { margin: 0; font-size: 11px; color: #8b949e; line-height: 1.35; }
+      .tagbox-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; }
+      .tagbox-body { display: none; }
+      .tagbox.open .tagbox-body { display: grid; gap: 8px; }
+      .tag-count { font-size: 10px; font-weight: 700; color: #9aa3ad; background: rgba(255,255,255,.06); border-radius: 999px; padding: 2px 7px; }
       .tags { display: flex; flex-wrap: wrap; gap: 6px; }
-      .tag {
-        display: inline-flex; align-items: center; gap: 6px;
-        height: 24px; padding: 0 8px; border-radius: 999px;
-        background: color-mix(in srgb, var(--accent) 22%, transparent);
-        border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-        color: #fff; font-size: 11px; font-weight: 650;
-      }
-      .tag button {
-        width: 14px; height: 14px; border: 0; padding: 0; border-radius: 50%;
-        background: transparent; color: #fff; cursor: pointer; line-height: 1; font-size: 12px;
-      }
-      .tagbox input {
-        width: 100%; height: 30px; margin-top: 8px; border-radius: 8px;
-        border: 1px solid rgba(255,255,255,.10);
-        background: rgba(255,255,255,.05); color: #f2f4f7;
-        padding: 0 10px; font-size: 12px; outline: none;
-      }
-      .tagbox input::placeholder { color: #7d8692; }
-      .hints { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-      .hint {
-        height: 22px; padding: 0 8px; border-radius: 999px; cursor: pointer;
-        border: 1px dashed rgba(255,255,255,.16);
-        background: transparent; color: #9aa3ad; font-size: 11px; font-weight: 600;
-      }
-      .hint:hover { color: #fff; border-color: rgba(255,255,255,.35); }
-
-      .color-row { display: flex; gap: 8px; }
-      .swatch { width: 28px; height: 28px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+      .tag { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: #fff; font-size: 11px; font-weight: 650; }
+      .tag button { width: 14px; height: 14px; border: 0; padding: 0; background: transparent; color: #fff; cursor: pointer; }
+      .tagbox input { width: 100%; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.05); color: #f2f4f7; padding: 0 10px; font-size: 12px; outline: none; }
+      .swatch { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
       .swatch.on { border-color: #fff; }
-      .picker-wrap {
-        position: relative; width: 28px; height: 28px; border-radius: 8px; overflow: hidden;
-        border: 1px dashed rgba(255,255,255,.25);
-      }
-      .picker-wrap input { position: absolute; inset: -4px; width: 36px; height: 36px; border: 0; padding: 0; cursor: pointer; background: none; }
-
       .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       .stat { background: rgba(255,255,255,.04); border-radius: 12px; padding: 10px 12px; }
-      .stat b { display: block; font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+      .stat b { display: block; font-size: 18px; font-weight: 700; }
       .stat span { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-
-      .foot { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 0 14px 14px; }
-      .ghost, .primary {
-        height: 34px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer;
-      }
-      .ghost {
-        border: 1px solid rgba(255,255,255,.08);
-        background: transparent; color: #c5cbd3;
-      }
-      .ghost:hover { background: rgba(255,255,255,.06); color: #fff; }
-      .danger:hover { color: #ff8a80; border-color: rgba(255,138,128,.35); }
-      .primary {
-        grid-column: 1 / -1;
-        border: 0; color: #fff;
-        background: var(--accent, #e65100);
-      }
-      .primary:hover { filter: brightness(1.08); }
-
-      .report {
-        display: none; width: min(560px, 92vw); max-height: 78vh; overflow: auto;
-        border-radius: 18px;
-      }
+      .foot { display: grid; gap: 8px; padding: 0 14px 14px; }
+      .ghost, .primary { height: 34px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+      .ghost { border: 1px solid rgba(255,255,255,.08); background: transparent; color: #c5cbd3; }
+      .primary { border: 0; color: #fff; background: var(--accent, #e65100); }
+      .report { display: none; width: min(620px, 94vw); max-height: 80vh; overflow: auto; border-radius: 18px; }
       .report.show { display: block; }
-      .report .body { display: grid; gap: 14px; }
       .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .kpi .stat b { font-size: 16px; }
-      .section-title { margin: 2px 0 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
+      .section-title { margin: 4px 0 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
       .bars { display: grid; gap: 6px; }
-      .bar-row { display: grid; grid-template-columns: 46px 1fr 28px; gap: 8px; align-items: center; font-size: 11px; color: #c5cbd3; }
+      .bar-row { display: grid; grid-template-columns: 64px 1fr 28px; gap: 8px; align-items: center; font-size: 11px; color: #c5cbd3; }
       .bar-track { height: 8px; border-radius: 99px; background: #3a4048; overflow: hidden; }
       .bar-fill { height: 100%; border-radius: 99px; background: var(--accent, #e65100); }
       .split { width: 100%; border-collapse: collapse; font-size: 11px; }
-      .split th { text-align: left; color: #8b949e; font-weight: 650; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
-      .split td { padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,.05); color: #e8eaed; }
-      .split td.num { text-align: right; font-variant-numeric: tabular-nums; }
-      .split td.name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .spark { width: 100%; height: 64px; display: block; }
+      .split th, .split td { padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,.06); }
+      .split th { text-align: left; color: #8b949e; }
+      .split td.num { text-align: right; }
       .note { font-size: 11px; color: #8b949e; line-height: 1.4; }
     </style>
-
-    <div class="fab" id="fab" title="Drag to move · click to open">
-      <span class="dot" id="fabCount">0</span>
-      <span class="label">Stale tickets</span>
-    </div>
-
+    <div class="fab" id="fab"><span class="dot" id="fabCount">0</span><span class="label" id="fabLabel">Ops panel</span></div>
     <section class="panel" id="panel">
       <header class="head" id="dragHandle">
-        <div class="logo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/>
-          </svg>
-        </div>
-        <div class="titles">
-          <h1>Stale tickets</h1>
-          <p>Drag to move</p>
-        </div>
-        <span class="grip" aria-hidden="true">
-          <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
-            <circle cx="3" cy="2" r="1.2"/><circle cx="9" cy="2" r="1.2"/>
-            <circle cx="3" cy="8" r="1.2"/><circle cx="9" cy="8" r="1.2"/>
-            <circle cx="3" cy="14" r="1.2"/><circle cx="9" cy="14" r="1.2"/>
-          </svg>
-        </span>
-        <button class="icon-btn" id="collapse" title="Minimize to pill">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          </svg>
-        </button>
+        <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+        <div class="titles"><h1 id="panelTitle">Ops panel</h1><p id="panelSub">Detecting list…</p></div>
+        <button class="icon-btn" id="collapse" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
       </header>
       <div class="body">
-        <div class="row-between">
-          <span class="label">Highlight</span>
-          <button class="toggle" id="enabled" aria-label="Toggle highlight"><i></i></button>
-        </div>
-        <div class="days-card">
-          <div class="days-top">
-            <span class="label">Updated older than</span>
-            <div class="days-val" id="daysLabel">6<span>days</span></div>
-          </div>
-          <input type="range" id="days" min="1" max="30" step="1" />
-          <div class="presets">
-            <button class="chip" data-days="3">3d</button>
-            <button class="chip" data-days="6">6d</button>
-            <button class="chip" data-days="10">10d</button>
-            <button class="chip" data-days="14">14d</button>
+        <div class="row-between"><span class="label">Page</span>
+          <div class="seg" id="moduleSeg">
+            <button type="button" data-module="auto">Auto</button>
+            <button type="button" data-module="tickets">Tickets</button>
+            <button type="button" data-module="journeys">Journeys</button>
           </div>
         </div>
-        <div class="tagbox" id="statusBox">
+        <div class="row-between"><span class="label">Highlight</span><button class="toggle" id="enabled"><i></i></button></div>
+        <div class="card">
+          <div class="row-between"><span class="label" id="daysCaption">Idle older than</span><div class="days-val" id="daysLabel">6<span>days</span></div></div>
+          <input type="range" id="days" min="1" max="45" step="1" />
+          <div class="chips" id="dayChips"></div>
+        </div>
+        <div class="card">
+          <div class="row-between"><span class="label">Match</span>
+            <div class="seg" id="matchMode">
+              <button type="button" data-mode="and">All</button>
+              <button type="button" data-mode="or">Any</button>
+            </div>
+          </div>
+          <p class="hint" id="matchHint"></p>
+          <span class="label">Views</span>
+          <div class="chips" id="viewPresets"></div>
+          <div class="chips">
+            <button class="ghost" id="saveView" type="button" style="height:28px;flex:1">Save view</button>
+            <button class="ghost" id="deleteView" type="button" style="height:28px;flex:1">Delete</button>
+          </div>
+        </div>
+        <div class="card" id="extraFilters"></div>
+        <div class="card" id="sortBox">
+          <div class="row-between">
+            <span class="label">Sort this list</span>
+            <div class="seg" id="sortDir">
+              <button type="button" data-dir="asc">A→Z</button>
+              <button type="button" data-dir="desc">Z→A</button>
+            </div>
+          </div>
+          <div class="chips" id="sortKeys"></div>
+          <p class="hint" id="sortHint">Reorders rows on this page only.</p>
+        </div>
+        <div class="card tagbox" id="statusBox">
           <button type="button" class="tagbox-head" id="statusToggle">
-            <span class="label">Also mark status</span>
-            <span style="display:flex;align-items:center;gap:8px">
-              <span class="tag-count" id="statusCount">0</span>
-              <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none">
-                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </span>
+            <span class="label" id="statusLabel">Status</span>
+            <span class="tag-count" id="statusCount">0</span>
           </button>
           <div class="tagbox-body">
             <div class="tags" id="statusTags"></div>
-            <input id="statusInput" type="text" placeholder="Type Open, Pending… Enter" autocomplete="off" spellcheck="false" />
-            <div class="hints" id="statusHints"></div>
+            <input id="statusInput" type="text" placeholder="Add status · Enter" autocomplete="off" spellcheck="false" />
+            <div class="chips" id="statusHints"></div>
+          </div>
+        </div>
+        <div class="card tagbox" id="startBox">
+          <button type="button" class="tagbox-head" id="startToggle">
+            <span class="label" id="startLabel">Start date</span>
+            <span class="tag-count" id="startCount">0</span>
+          </button>
+          <div class="tagbox-body">
+            <p class="hint">Reads “Start DD-MM-YYYY” from the journey title. Pick dates on this list or type one.</p>
+            <div class="tags" id="startTags"></div>
+            <input id="startInput" type="text" placeholder="14-09-2026 · Enter" autocomplete="off" spellcheck="false" />
+            <div class="chips" id="startHints"></div>
           </div>
         </div>
         <div>
           <div class="row-between" style="margin-bottom:8px"><span class="label">Color</span></div>
-          <div class="color-row">
+          <div class="chips">
             <button class="swatch" data-color="#e65100" style="background:#e65100"></button>
             <button class="swatch" data-color="#c62828" style="background:#c62828"></button>
             <button class="swatch" data-color="#6a1b9a" style="background:#6a1b9a"></button>
             <button class="swatch" data-color="#1565c0" style="background:#1565c0"></button>
             <button class="swatch" data-color="#2e7d32" style="background:#2e7d32"></button>
-            <label class="picker-wrap" title="Custom color">
-              <input type="color" id="customColor" />
-            </label>
+            <input type="color" id="customColor" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
           </div>
         </div>
         <div class="stats">
           <div class="stat"><b id="statTickets">0</b><span>Scanned</span></div>
-          <div class="stat"><b id="statMarked">0</b><span>Stale</span></div>
+          <div class="stat"><b id="statMarked">0</b><span>Marked</span></div>
         </div>
       </div>
       <div class="foot">
-        <button class="primary" id="openStale">Open stale in tabs</button>
+        <button class="primary" id="openStale">Open marked tabs</button>
         <button class="ghost" id="openStats">Statistics</button>
         <button class="ghost" id="rescan">Rescan</button>
       </div>
     </section>
-
     <section class="panel report" id="report">
       <header class="head" id="reportHandle">
-        <div class="logo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <div class="titles">
-          <h1>Ticket statistics</h1>
-          <p id="reportSub">Live snapshot of this list</p>
-        </div>
-        <button class="icon-btn" id="closeReport" title="Back">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
+        <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+        <div class="titles"><h1 id="reportTitle">Statistics</h1><p id="reportSub">Live snapshot</p></div>
+        <button class="icon-btn" id="closeReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </header>
       <div class="body" id="reportBody"></div>
       <div class="foot">
@@ -611,86 +754,48 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
-
-  function kpiCard(label, sum) {
-    return `
-      <div class="stat">
-        <b>${fmtDur(sum.avg)}</b>
-        <span>${label} · avg</span>
-        <div class="note" style="margin-top:6px">med ${fmtDur(sum.med)} · p90 ${fmtDur(sum.p90)} · n ${sum.n}</div>
-      </div>`;
-  }
+  function builtinPresets() { return moduleId === 'journeys' ? JOURNEY_PRESETS : TICKET_PRESETS; }
+  function allPresets() { return [...builtinPresets(), ...(page().presets || [])]; }
 
   function barsHtml(buckets) {
     const max = Math.max(1, ...buckets.map((b) => b.n));
-    return `<div class="bars">${buckets.map((b) => `
-      <div class="bar-row">
-        <span>${b.key}</span>
-        <div class="bar-track"><div class="bar-fill" style="width:${(b.n / max) * 100}%"></div></div>
-        <span>${b.n}</span>
-      </div>`).join('')}</div>`;
+    return `<div class="bars">${buckets.map((b) => `<div class="bar-row"><span>${escapeHtml(b.key)}</span><div class="bar-track"><div class="bar-fill" style="width:${(b.n / max) * 100}%"></div></div><span>${b.n}</span></div>`).join('')}</div>`;
   }
-
-  function tableHtml(idleRows, cycleRows) {
-    const cycleMap = new Map(cycleRows.map((r) => [r.name, r]));
-    const rows = idleRows.slice(0, 12);
-    if (!rows.length) return '<p class="note">No rows on this list.</p>';
-    return `<table class="split">
-      <thead><tr><th>Group</th><th class="num">n</th><th class="num">Idle avg</th><th class="num">Cycle avg</th></tr></thead>
-      <tbody>${rows.map((r) => {
-        const c = cycleMap.get(r.name) || {};
-        return `<tr>
-          <td class="name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
-          <td class="num">${r.n}</td>
-          <td class="num">${fmtDur(r.avg)}</td>
-          <td class="num">${fmtDur(c.avg)}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table>`;
-  }
-
-  function sparkHtml(hist, key, color) {
-    const pts = hist.map((h) => h[key]).filter((n) => n != null);
-    if (pts.length < 2) return '<p class="note">Save at least two snapshots for a trend.</p>';
-    const min = Math.min(...pts);
-    const max = Math.max(...pts);
-    const span = max - min || 1;
-    const w = 520;
-    const h = 64;
-    const d = pts.map((v, i) => {
-      const x = (i / (pts.length - 1)) * (w - 8) + 4;
-      const y = h - 6 - ((v - min) / span) * (h - 12);
-      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-      <path d="${d}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round"/>
-    </svg>
-    <div class="note">idle avg ${fmtDur(hist[hist.length - 1].idleAvg)} · cycle avg ${fmtDur(hist[hist.length - 1].cycleAvg)} · ${hist.length} snapshots</div>`;
+  function tableHtml(rows) {
+    if (!rows.length) return '<p class="note">No groups on this list.</p>';
+    return `<table class="split"><thead><tr><th>Group</th><th class="num">n</th></tr></thead><tbody>${rows.slice(0, 12).map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.n}</td></tr>`).join('')}</tbody></table>`;
   }
 
   function renderReport() {
     const r = buildReport();
-    const hist = loadHistory();
-    $('reportSub').textContent = `${r.n} tickets on this list · ${hist.length} saved snapshots`;
-    $('reportBody').innerHTML = `
+    const hist = loadHistory().filter((h) => h.module === r.module);
+    $('reportTitle').textContent = r.module === 'journeys' ? 'Journey statistics' : 'Ticket statistics';
+    $('reportSub').textContent = `${r.n} rows · ${hist.length} snapshots · names not stored`;
+    const extra = r.module === 'journeys' ? `
       <div class="kpi">
-        ${kpiCard('Idle (now − updated)', r.idle)}
-        ${kpiCard('Cycle (updated − created)', r.cycle)}
+        <div class="stat"><b>${r.awaiting}</b><span>Awaiting info</span></div>
+        <div class="stat"><b>${r.processing}</b><span>Being processed</span></div>
+        <div class="stat"><b>${r.startWeek}</b><span>Start in 7d</span></div>
+        <div class="stat"><b>${r.startPast}</b><span>Start already passed</span></div>
       </div>
-      <div class="section-title">Idle buckets</div>
+      <div class="section-title">Child-ticket progress</div>
+      ${barsHtml(r.progBuckets)}
+      <div class="section-title">Internal vs external</div>
+      ${tableHtml(r.byKind)}
+      <div class="kpi">
+        <div class="stat"><b>${r.progress.avg == null ? '—' : Math.round(r.progress.avg) + '%'}</b><span>Avg child progress</span></div>
+        <div class="stat"><b>${fmtDur(r.startIn.med)}</b><span>Median days to start</span></div>
+      </div>` : `
+      <div class="kpi">
+        <div class="stat"><b>${fmtDur(r.idle.avg)}</b><span>Idle avg</span></div>
+        <div class="stat"><b>${fmtDur(r.idle.p90)}</b><span>Idle p90</span></div>
+      </div>`;
+    $('reportBody').innerHTML = `${extra}
+      <div class="section-title">${r.module === 'journeys' ? 'Days in current status' : 'Idle buckets'}</div>
       ${barsHtml(r.idleBuckets)}
-      <div class="section-title">Cycle buckets</div>
-      ${barsHtml(r.cycleBuckets)}
       <div class="section-title">By status</div>
-      ${tableHtml(r.byStatusIdle, r.byStatusCycle)}
-      <div class="section-title">By priority</div>
-      ${tableHtml(r.byPriorityIdle, r.byPriorityCycle)}
-      <div class="section-title">By group / agent</div>
-      ${tableHtml(r.byOwnerIdle, r.byOwnerCycle)}
-      <div class="section-title">Saved snapshots</div>
-      ${sparkHtml(hist, 'idleAvg', settings.color)}
-      <p class="note">Idle = time since last modification. Cycle = time from created to last modification. Only tickets currently in the list are included.</p>
-    `;
+      ${tableHtml(r.byStatus)}
+      <p class="note">Journeys use the badge “since N days” when present, otherwise created-on. Person names are stripped from stored labels.</p>`;
   }
 
   function clampPos(x, y) {
@@ -701,238 +806,325 @@
       y: Math.min(Math.max(pad, y), Math.max(pad, window.innerHeight - rect.height - pad))
     };
   }
-
-  function placeDefault() {
-    host.style.top = 'auto';
-    host.style.left = 'auto';
-    host.style.right = '20px';
-    host.style.bottom = '20px';
-  }
-
+  function placeDefault() { host.style.top = 'auto'; host.style.left = 'auto'; host.style.right = '20px'; host.style.bottom = '20px'; }
   function placeAt(x, y) {
     const p = clampPos(x, y);
-    host.style.left = p.x + 'px';
-    host.style.top = p.y + 'px';
-    host.style.right = 'auto';
-    host.style.bottom = 'auto';
+    host.style.left = p.x + 'px'; host.style.top = p.y + 'px'; host.style.right = 'auto'; host.style.bottom = 'auto';
     return p;
   }
-
   function applySavedPosition() {
-    if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
-      requestAnimationFrame(() => placeAt(settings.x, settings.y));
-    } else {
-      placeDefault();
-    }
+    if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) requestAnimationFrame(() => placeAt(settings.x, settings.y));
+    else placeDefault();
   }
-
   function renderStats() {
-    if (!$('statTickets')) return;
     $('statTickets').textContent = String(lastStats.tickets);
     $('statMarked').textContent = String(lastStats.marked);
     $('fabCount').textContent = String(lastStats.marked);
-    const btn = $('openStale');
-    if (btn) btn.textContent = lastStats.marked
-      ? `Open ${lastStats.marked} stale tab${lastStats.marked === 1 ? '' : 's'}`
-      : 'Open stale in tabs';
-    const badge = document.querySelector('#sth-nav-item [data-sth-badge]');
-    if (badge) badge.textContent = String(lastStats.marked || 0);
+    $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked tab${lastStats.marked === 1 ? '' : 's'}` : 'Open marked tabs';
   }
-
-  function syncUI() {
-    shadow.querySelectorAll('.panel, .fab, .logo, .toggle, input[type="range"], .primary').forEach((el) => {
-      el.style.setProperty('--accent', settings.color);
-    });
-    $('enabled').classList.toggle('on', settings.enabled);
-    $('days').value = String(settings.days);
-    $('days').style.setProperty('--p', ((settings.days - 1) / 29) * 100 + '%');
-    $('daysLabel').innerHTML = `${settings.days}<span>day${settings.days === 1 ? '' : 's'}</span>`;
-    $('customColor').value = settings.color;
-    shadow.querySelectorAll('.chip').forEach((chip) => {
-      chip.classList.toggle('on', Number(chip.dataset.days) === settings.days);
-    });
-    shadow.querySelectorAll('.swatch').forEach((sw) => {
-      sw.classList.toggle('on', sw.dataset.color.toLowerCase() === settings.color.toLowerCase());
-    });
-    panel.classList.toggle('hide', settings.collapsed || reportOpen);
-    fab.classList.toggle('show', settings.collapsed && !reportOpen);
-    report.classList.toggle('show', reportOpen && !settings.collapsed);
-    applyPageStyles();
-    applySavedPosition();
-    renderStatusTags();
-    const box = $('statusBox');
-    if (box) box.classList.toggle('open', !!settings.statusOpen);
-    const count = $('statusCount');
-    if (count) count.textContent = String((settings.statuses || []).length);
-  }
-
   function discoveredStatuses() {
-    const set = new Set();
-    document.querySelectorAll(ROW_SEL).forEach((row) => {
-      const s = rowStatus(row);
-      if (s) set.add(s);
-    });
-    return [...set].sort((a, b) => a.localeCompare(b));
+    return [...new Set(collectRows().map((r) => r.status).filter((s) => s && s !== '—'))].sort((a, b) => a.localeCompare(b));
   }
-
-  function addStatus(raw) {
-    const name = String(raw || '').replace(/\s+/g, ' ').trim();
-    if (!name) return;
-    const exists = settings.statuses.some((s) => s.toLowerCase() === name.toLowerCase());
-    if (exists) return;
-    update({ statuses: [...settings.statuses, name] });
+  function discoveredStarts() {
+    return [...new Set(collectRows().map((r) => r.startKey).filter(Boolean))].sort();
   }
-
-  function removeStatus(name) {
-    update({
-      statuses: settings.statuses.filter((s) => s.toLowerCase() !== String(name).toLowerCase())
-    });
-  }
-
   function renderStatusTags() {
     const wrap = $('statusTags');
     const hints = $('statusHints');
-    if (!wrap || !hints) return;
-    wrap.innerHTML = settings.statuses.map((s) =>
-      `<span class="tag">${s}<button type="button" data-remove="${s}" aria-label="Remove ${s}">×</button></span>`
-    ).join('');
+    const cfg = page();
+    wrap.innerHTML = cfg.statuses.map((s) => `<span class="tag">${escapeHtml(s)}<button type="button" data-remove="${escapeHtml(s)}">×</button></span>`).join('');
     wrap.querySelectorAll('button[data-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => removeStatus(btn.dataset.remove));
+      btn.addEventListener('click', () => updatePage({ statuses: cfg.statuses.filter((s) => s.toLowerCase() !== btn.dataset.remove.toLowerCase()), activePreset: null }));
     });
-    const selected = new Set(settings.statuses.map((s) => s.toLowerCase()));
-    hints.innerHTML = discoveredStatuses()
-      .filter((s) => !selected.has(s.toLowerCase()))
-      .map((s) => `<button type="button" class="hint" data-add="${s}">${s}</button>`)
-      .join('');
+    const selected = new Set(cfg.statuses.map((s) => s.toLowerCase()));
+    hints.innerHTML = discoveredStatuses().filter((s) => !selected.has(s.toLowerCase()))
+      .map((s) => `<button type="button" class="chip" data-add="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('');
     hints.querySelectorAll('button[data-add]').forEach((btn) => {
-      btn.addEventListener('click', () => addStatus(btn.dataset.add));
+      btn.addEventListener('click', () => {
+        if (cfg.statuses.some((s) => s.toLowerCase() === btn.dataset.add.toLowerCase())) return;
+        updatePage({ statuses: [...cfg.statuses, btn.dataset.add], activePreset: null });
+      });
     });
   }
+  function addStartDate(raw) {
+    const key = parseStartInput(raw);
+    if (!key) return;
+    if ((page().startDates || []).includes(key)) return;
+    updatePage({ startDates: [...(page().startDates || []), key], activePreset: null, startOpen: true });
+  }
+  function renderStartTags() {
+    const wrap = $('startTags');
+    const hints = $('startHints');
+    const cfg = page();
+    wrap.innerHTML = (cfg.startDates || []).map((s) =>
+      `<span class="tag">${escapeHtml(formatStart(s))}<button type="button" data-remove="${escapeHtml(s)}">×</button></span>`
+    ).join('');
+    wrap.querySelectorAll('button[data-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => updatePage({ startDates: cfg.startDates.filter((s) => s !== btn.dataset.remove), activePreset: null }));
+    });
+    const selected = new Set(cfg.startDates || []);
+    hints.innerHTML = discoveredStarts().filter((s) => !selected.has(s))
+      .map((s) => `<button type="button" class="chip" data-add="${escapeHtml(s)}">${escapeHtml(formatStart(s))}</button>`).join('');
+    hints.querySelectorAll('button[data-add]').forEach((btn) => {
+      btn.addEventListener('click', () => addStartDate(btn.dataset.add));
+    });
+  }
+  function renderViewPresets() {
+    const wrap = $('viewPresets');
+    const cfg = page();
+    wrap.innerHTML = allPresets().map((p) => `<button type="button" class="chip${cfg.activePreset === p.id ? ' on' : ''}" data-preset="${p.id}">${escapeHtml(p.name)}</button>`).join('');
+    wrap.querySelectorAll('button[data-preset]').forEach((btn) => btn.addEventListener('click', () => applyPreset(btn.dataset.preset)));
+  }
+  function applyPreset(id) {
+    const p = allPresets().find((x) => x.id === id);
+    if (!p) return;
+    updatePage({
+      days: p.days,
+      statuses: [...(p.statuses || [])],
+      matchMode: p.matchMode === 'and' ? 'and' : 'or',
+      maxProgress: p.maxProgress ?? null,
+      startWithin: p.startWithin ?? null,
+      startDates: [...(p.startDates || [])],
+      activePreset: p.id,
+      statusOpen: !!(p.statuses && p.statuses.length),
+      startOpen: !!(p.startDates && p.startDates.length)
+    });
+  }
+  function renderExtraFilters() {
+    const box = $('extraFilters');
+    if (moduleId !== 'journeys') { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'grid';
+    const cfg = page();
+    box.innerHTML = `
+      <div class="row-between"><span class="label">Max child progress %</span><b>${cfg.maxProgress == null ? 'off' : cfg.maxProgress + '%'}</b></div>
+      <input type="range" id="maxProgress" min="0" max="100" step="5" value="${cfg.maxProgress == null ? 100 : cfg.maxProgress}" />
+      <div class="chips">
+        <button type="button" class="chip" data-prog="">Off</button>
+        <button type="button" class="chip" data-prog="25">≤25%</button>
+        <button type="button" class="chip" data-prog="40">≤40%</button>
+        <button type="button" class="chip" data-prog="60">≤60%</button>
+      </div>
+      <div class="row-between"><span class="label">Start within days</span><b>${cfg.startWithin == null ? 'off' : cfg.startWithin + 'd'}</b></div>
+      <div class="chips">
+        <button type="button" class="chip" data-start="">Off</button>
+        <button type="button" class="chip" data-start="3">3d</button>
+        <button type="button" class="chip" data-start="7">7d</button>
+        <button type="button" class="chip" data-start="14">14d</button>
+      </div>`;
+    box.querySelectorAll('[data-prog]').forEach((btn) => btn.addEventListener('click', () => updatePage({ maxProgress: btn.dataset.prog === '' ? null : Number(btn.dataset.prog), activePreset: null })));
+    box.querySelectorAll('[data-start]').forEach((btn) => btn.addEventListener('click', () => updatePage({ startWithin: btn.dataset.start === '' ? null : Number(btn.dataset.start), activePreset: null })));
+    box.querySelector('#maxProgress')?.addEventListener('input', (e) => updatePage({ maxProgress: Number(e.target.value), activePreset: null }));
+  }
 
-  function update(partial) {
+  function sortOptions() {
+    if (moduleId === 'journeys') {
+      return [
+        { id: 'default', name: 'Default' },
+        { id: 'start', name: 'Start date' },
+        { id: 'created', name: 'Created On' },
+        { id: 'initiator', name: 'Initiator' },
+        { id: 'status', name: 'Request Status' },
+        { id: 'progress', name: 'Child progress' }
+      ];
+    }
+    return [
+      { id: 'default', name: 'Default' },
+      { id: 'created', name: 'Created' },
+      { id: 'status', name: 'Status' }
+    ];
+  }
+
+  function renderSortKeys() {
+    const wrap = $('sortKeys');
+    const cfg = page();
+    wrap.innerHTML = sortOptions().map((opt) =>
+      `<button type="button" class="chip${cfg.sortKey === opt.id ? ' on' : ''}" data-sort="${opt.id}">${escapeHtml(opt.name)}</button>`
+    ).join('');
+    wrap.querySelectorAll('[data-sort]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (page().sortKey === btn.dataset.sort && btn.dataset.sort !== 'default') {
+          updatePage({ sortDir: page().sortDir === 'asc' ? 'desc' : 'asc' });
+        } else {
+          updatePage({ sortKey: btn.dataset.sort });
+        }
+      });
+    });
+    shadow.querySelectorAll('#sortDir button').forEach((btn) => btn.classList.toggle('on', btn.dataset.dir === cfg.sortDir));
+    const label = sortOptions().find((o) => o.id === cfg.sortKey)?.name || 'Default';
+    $('sortHint').textContent = cfg.sortKey === 'default'
+      ? 'Table order from Freshservice.'
+      : `Sorted by ${label}, ${cfg.sortDir === 'desc' ? 'newest / Z first' : 'oldest / A first'}.`;
+  }
+
+  function syncUI() {
+    moduleId = detectModule();
+    const cfg = page();
+    const name = moduleId === 'journeys' ? 'Journeys' : 'Tickets';
+    shadow.querySelectorAll('.panel, .fab, .logo, .toggle, input[type="range"], .primary').forEach((el) => el.style.setProperty('--accent', cfg.color));
+    $('panelTitle').textContent = name;
+    $('panelSub').textContent = settings.module === 'auto' ? `Auto · ${name}` : name;
+    $('fabLabel').textContent = name;
+    $('daysCaption').textContent = moduleId === 'journeys' ? 'Status / created older than' : 'Updated older than';
+    $('enabled').classList.toggle('on', cfg.enabled);
+    $('days').value = String(cfg.days);
+    $('days').style.setProperty('--p', ((cfg.days - 1) / 44) * 100 + '%');
+    $('daysLabel').innerHTML = `${cfg.days}<span>day${cfg.days === 1 ? '' : 's'}</span>`;
+    $('customColor').value = cfg.color;
+    $('dayChips').innerHTML = [3, 6, 10, 14, 21, 30].map((d) => `<button type="button" class="chip${d === cfg.days ? ' on' : ''}" data-days="${d}">${d}d</button>`).join('');
+    $('dayChips').querySelectorAll('[data-days]').forEach((btn) => btn.addEventListener('click', () => updatePage({ days: Number(btn.dataset.days), activePreset: null })));
+    shadow.querySelectorAll('#matchMode button').forEach((btn) => btn.classList.toggle('on', btn.dataset.mode === cfg.matchMode));
+    shadow.querySelectorAll('#moduleSeg button').forEach((btn) => btn.classList.toggle('on', btn.dataset.module === settings.module));
+    $('matchHint').textContent = cfg.matchMode === 'and'
+      ? `Mark only if every selected filter matches (age, status, start).`
+      : `Mark if age, status, or start date matches.`;
+    $('statusLabel').textContent = cfg.matchMode === 'and' ? 'Limit to status' : 'Also mark status';
+    $('statusCount').textContent = String(cfg.statuses.length);
+    $('statusBox').classList.toggle('open', !!cfg.statusOpen);
+    $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
+    $('startCount').textContent = String((cfg.startDates || []).length);
+    $('startBox').classList.toggle('open', !!cfg.startOpen);
+    $('startBox').style.display = moduleId === 'journeys' ? '' : 'none';
+    $('deleteView').style.visibility = (cfg.presets || []).some((p) => p.id === cfg.activePreset) ? 'visible' : 'hidden';
+    shadow.querySelectorAll('.swatch').forEach((sw) => sw.classList.toggle('on', sw.dataset.color.toLowerCase() === cfg.color.toLowerCase()));
+    panel.classList.toggle('hide', settings.collapsed || reportOpen);
+    fab.classList.toggle('show', settings.collapsed && !reportOpen);
+    report.classList.toggle('show', reportOpen && !settings.collapsed);
+    renderViewPresets();
+    renderStatusTags();
+    renderStartTags();
+    renderExtraFilters();
+    renderSortKeys();
+    applyPageStyles();
+    applySavedPosition();
+  }
+
+  function updateRoot(partial) {
     settings = { ...settings, ...partial };
     saveSettings(settings);
     syncUI();
-    if (!('x' in partial || 'y' in partial)) markTickets();
+    if (!('x' in partial || 'y' in partial || 'collapsed' in partial)) markTickets();
+  }
+  function updatePage(partial) {
+    settings[moduleId] = { ...page(), ...partial };
+    saveSettings(settings);
+    syncUI();
+    markTickets();
   }
 
   const didDrag = { current: false };
-
-  function makeDraggable(handle, visual) {
+  function makeDraggable(handle) {
     handle.addEventListener('pointerdown', (e) => {
       if (e.button != null && e.button !== 0) return;
       if (handle !== fab && e.target.closest('#collapse, .icon-btn, button, input, label')) return;
       e.preventDefault();
       const rect = host.getBoundingClientRect();
-      const origX = rect.left;
-      const origY = rect.top;
-      const startX = e.clientX;
-      const startY = e.clientY;
-      let moved = false;
-      didDrag.current = false;
-
+      const origX = rect.left; const origY = rect.top;
+      const startX = e.clientX; const startY = e.clientY;
+      let moved = false; didDrag.current = false;
       const onMove = (ev) => {
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
+        const dx = ev.clientX - startX; const dy = ev.clientY - startY;
         if (!moved && Math.hypot(dx, dy) < 3) return;
-        moved = true;
-        didDrag.current = true;
-        visual.classList.add('dragging');
+        moved = true; didDrag.current = true;
         const p = placeAt(origX + dx, origY + dy);
-        settings.x = p.x;
-        settings.y = p.y;
+        settings.x = p.x; settings.y = p.y;
       };
-
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
-        visual.classList.remove('dragging');
         if (moved) saveSettings(settings);
       };
-
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     });
   }
+  makeDraggable($('dragHandle'));
+  makeDraggable($('reportHandle'));
+  makeDraggable(fab);
 
-  makeDraggable($('dragHandle'), panel);
-  makeDraggable($('reportHandle'), report);
-  makeDraggable(fab, fab);
-
-  $('statusToggle').addEventListener('click', (e) => {
-    e.stopPropagation();
-    update({ statusOpen: !settings.statusOpen });
-  });
-
+  $('statusToggle').addEventListener('click', (e) => { e.stopPropagation(); updatePage({ statusOpen: !page().statusOpen }); });
+  $('startToggle').addEventListener('click', (e) => { e.stopPropagation(); updatePage({ startOpen: !page().startOpen }); });
   const statusInput = $('statusInput');
-  const commitStatusInput = () => {
-    addStatus(statusInput.value);
-    statusInput.value = '';
-  };
+  const startInput = $('startInput');
   ['keydown', 'keypress', 'keyup'].forEach((type) => {
     statusInput.addEventListener(type, (e) => e.stopPropagation());
+    startInput.addEventListener(type, (e) => e.stopPropagation());
+  });
+  startInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const raw = startInput.value;
+      startInput.value = '';
+      addStartDate(raw);
+    }
   });
   statusInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
-      commitStatusInput();
-    } else if (e.key === 'Backspace' && !statusInput.value && settings.statuses.length) {
-      removeStatus(settings.statuses[settings.statuses.length - 1]);
+      const name = statusInput.value.replace(/\s+/g, ' ').trim();
+      statusInput.value = '';
+      if (!name) return;
+      if (page().statuses.some((s) => s.toLowerCase() === name.toLowerCase())) return;
+      updatePage({ statuses: [...page().statuses, name], activePreset: null });
     }
   });
-  statusInput.addEventListener('blur', () => {
-    if (statusInput.value.trim()) commitStatusInput();
+  $('enabled').addEventListener('click', () => updatePage({ enabled: !page().enabled }));
+  $('days').addEventListener('input', (e) => updatePage({ days: Number(e.target.value), activePreset: null }));
+  shadow.querySelectorAll('#matchMode button').forEach((btn) => btn.addEventListener('click', () => updatePage({ matchMode: btn.dataset.mode, activePreset: null })));
+  shadow.querySelectorAll('#moduleSeg button').forEach((btn) => btn.addEventListener('click', () => updateRoot({ module: btn.dataset.module })));
+  shadow.querySelectorAll('#sortDir button').forEach((btn) => btn.addEventListener('click', () => updatePage({ sortDir: btn.dataset.dir })));
+  $('saveView').addEventListener('click', () => {
+    const name = window.prompt('Name this view', `${moduleId} ${page().days}d`);
+    if (!name) return;
+    const preset = {
+      id: `p-${Date.now()}`,
+      name: name.replace(/\s+/g, ' ').trim().slice(0, 32),
+      days: page().days,
+      statuses: [...page().statuses],
+      matchMode: page().matchMode,
+      maxProgress: page().maxProgress,
+      startWithin: page().startWithin,
+      startDates: [...(page().startDates || [])]
+    };
+    updatePage({ presets: [...page().presets, preset], activePreset: preset.id });
   });
-
-  $('enabled').addEventListener('click', () => update({ enabled: !settings.enabled }));
-  $('days').addEventListener('input', (e) => update({ days: Number(e.target.value) }));
-  shadow.querySelectorAll('.chip').forEach((chip) => {
-    chip.addEventListener('click', () => update({ days: Number(chip.dataset.days) }));
+  $('deleteView').addEventListener('click', () => {
+    const id = page().activePreset;
+    if (!(page().presets || []).some((p) => p.id === id)) return;
+    if (!confirm('Delete this saved view?')) return;
+    updatePage({ presets: page().presets.filter((p) => p.id !== id), activePreset: null });
   });
-  shadow.querySelectorAll('.swatch').forEach((sw) => {
-    sw.addEventListener('click', () => update({ color: sw.dataset.color }));
-  });
-  $('customColor').addEventListener('input', (e) => update({ color: e.target.value }));
-  $('collapse').addEventListener('click', (e) => {
-    e.stopPropagation();
-    update({ collapsed: true });
-  });
-  fab.addEventListener('click', () => {
-    if (didDrag.current) {
-      didDrag.current = false;
-      return;
-    }
-    update({ collapsed: false });
-  });
-  $('openStale').addEventListener('click', openStaleTickets);
+  shadow.querySelectorAll('.swatch').forEach((sw) => sw.addEventListener('click', () => updatePage({ color: sw.dataset.color })));
+  $('customColor').addEventListener('input', (e) => updatePage({ color: e.target.value }));
+  $('collapse').addEventListener('click', (e) => { e.stopPropagation(); updateRoot({ collapsed: true }); });
+  fab.addEventListener('click', () => { if (didDrag.current) { didDrag.current = false; return; } updateRoot({ collapsed: false }); });
+  $('openStale').addEventListener('click', openMarked);
   $('openStats').addEventListener('click', () => {
     reportOpen = true;
-    if (settings.collapsed) update({ collapsed: false });
+    if (settings.collapsed) updateRoot({ collapsed: false });
     else syncUI();
     renderReport();
   });
-  $('closeReport').addEventListener('click', (e) => {
-    e.stopPropagation();
-    reportOpen = false;
-    syncUI();
-  });
-  $('saveSnap').addEventListener('click', () => {
-    saveSnapshot();
-    renderReport();
-  });
+  $('closeReport').addEventListener('click', (e) => { e.stopPropagation(); reportOpen = false; syncUI(); });
+  $('saveSnap').addEventListener('click', () => { saveSnapshot(); renderReport(); });
   $('clearHist').addEventListener('click', () => {
-    if (!confirm('Clear all saved statistics snapshots?')) return;
+    if (!confirm('Clear saved statistics snapshots?')) return;
     localStorage.removeItem(HISTORY_KEY);
     renderReport();
   });
   $('rescan').addEventListener('click', markTickets);
+  document.addEventListener('click', (e) => {
+    const th = e.target.closest?.('th[data-sth-col="start"]');
+    if (!th) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const nextDir = page().sortKey === 'start' && page().sortDir === 'asc' ? 'desc' : 'asc';
+    updatePage({ sortKey: 'start', sortDir: nextDir });
+  }, true);
 
   window.addEventListener('resize', () => {
     if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
       const p = placeAt(settings.x, settings.y);
-      settings.x = p.x;
-      settings.y = p.y;
-      saveSettings(settings);
+      settings.x = p.x; settings.y = p.y; saveSettings(settings);
     }
   });
 
