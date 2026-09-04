@@ -1,5 +1,6 @@
 // Human: Highlight matching rows, inject the start column, and reorder the visible table page.
 // Agent: WRITES row/cell CSS classes and tbody child order. CALLS enrichList when an API key is available.
+// Keep existing marks until the new hit set is ready so async enrich cannot flash the highlight.
 
 import { enrichList } from '../lib/api/enrich';
 import { CELL_MARK, ROW_MARK } from '../lib/constants';
@@ -22,6 +23,38 @@ export function clearMarks(doc: Document = document): void {
   doc.querySelectorAll(`.${CELL_MARK}`).forEach((el) => el.classList.remove(CELL_MARK));
 }
 
+/** Add/remove highlight classes without blanking the current set first. */
+export function syncRowMarks(hits: RowItem[], enabled: boolean, doc: Document = document): void {
+  const hitRows = new Set(enabled ? hits.map((h) => h.row) : []);
+  const hitCells = new Set(enabled ? hits.map((h) => h.cell).filter((c): c is Element => !!c) : []);
+  doc.querySelectorAll(`tr.${ROW_MARK}`).forEach((el) => {
+    if (hitRows.has(el as HTMLTableRowElement)) return;
+    el.classList.remove(ROW_MARK);
+    el.removeAttribute('data-stale-days');
+  });
+  doc.querySelectorAll(`.${CELL_MARK}`).forEach((el) => {
+    if (!hitCells.has(el)) el.classList.remove(CELL_MARK);
+  });
+  if (!enabled) return;
+  hits.forEach((item) => {
+    item.row.classList.add(ROW_MARK);
+    if (item.idleDays != null) item.row.dataset.staleDays = String(Math.floor(item.idleDays));
+    else item.row.removeAttribute('data-stale-days');
+    if (item.cell) item.cell.classList.add(CELL_MARK);
+  });
+}
+
+export function visibleTableRows(body: HTMLTableSectionElement): HTMLTableRowElement[] {
+  return [...body.children].filter((el): el is HTMLTableRowElement =>
+    el instanceof HTMLTableRowElement && el.classList.contains('et-tr'));
+}
+
+export function tbodyNeedsReorder(body: HTMLTableSectionElement, desired: HTMLTableRowElement[]): boolean {
+  const current = visibleTableRows(body);
+  if (current.length !== desired.length) return true;
+  return current.some((row, i) => row !== desired[i]);
+}
+
 export function sortTableRows(items: RowItem[]): void {
   const cfg = page();
   const key: SortKey = cfg.sortKey || 'default';
@@ -36,27 +69,22 @@ export function sortTableRows(items: RowItem[]): void {
   });
   groups.forEach((list, body) => {
     list.sort((a, b) => compareItems(a, b, key, dir));
+    const desired = list.map((item) => item.row);
+    if (!tbodyNeedsReorder(body, desired)) return;
     const occ = [...body.querySelectorAll('occluded-content')];
-    list.forEach((item) => body.appendChild(item.row));
+    desired.forEach((row) => body.appendChild(row));
     occ.forEach((el) => body.appendChild(el));
   });
 }
 
 export async function paintList(doc: Document = document, force = false): Promise<void> {
   const gen = ++paintGen;
-  clearMarks(doc);
   const scraped = collectRows(doc);
   const enrich = await enrichList(scraped, force);
   if (gen !== paintGen) return;
   const items = enrich.items;
   const hits = items.filter((item) => itemMatches(item, page()));
-  if (page().enabled) {
-    hits.forEach((item) => {
-      item.row.classList.add(ROW_MARK);
-      if (item.idleDays != null) item.row.dataset.staleDays = String(Math.floor(item.idleDays));
-      if (item.cell) item.cell.classList.add(CELL_MARK);
-    });
-  }
+  syncRowMarks(hits, page().enabled, doc);
   const extraMarked = enrich.extraMarked;
   setLastStats({
     tickets: items.length,

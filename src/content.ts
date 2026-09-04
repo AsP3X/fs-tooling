@@ -1,7 +1,8 @@
 // Human: Content-script entry. Mounts the shadow panel on Freshservice / Freshworks list pages.
-// Agent: WRITES #sth-host and #sth-page-style; disconnects a previous observer so re-injects (HMR/reload) stay single-instance.
+// Agent: WRITES #sth-host and #sth-page-style; observer ignores our start-column writes so paint cannot loop.
 
 import { HOST_ID, STYLE_ID } from './lib/constants';
+import { shouldIgnoreMutations } from './page/mutations';
 import { markTickets } from './page/paint';
 import { runtime } from './page/runtime';
 import { initPanel } from './panel/ui';
@@ -26,9 +27,7 @@ markTickets();
 
 let timer: ReturnType<typeof setTimeout>;
 window.__staleTicketObserver = new MutationObserver((muts) => {
-  if (muts.every((m) => host.contains(m.target) || (m.target instanceof Element && m.target.closest(`#${HOST_ID}`)))) {
-    return;
-  }
+  if (shouldIgnoreMutations(muts, host)) return;
   clearTimeout(timer);
   timer = setTimeout(() => {
     markTickets();

@@ -13,7 +13,7 @@ export function applyPageStyles(): void {
   const el = pageStyleElement();
   if (!el) return;
   const c = page().color;
-  el.textContent = `
+  const css = `
       .${ROW_MARK} {
         background-color: ${hexToRgba(c, 0.18)} !important;
         box-shadow: inset 4px 0 0 ${c} !important;
@@ -72,4 +72,6 @@ export function applyPageStyles(): void {
       }
       td[data-sth-col="start"] .sth-empty { opacity: .35; }
     `;
+  if (el.textContent === css) return;
+  el.textContent = css;
 }

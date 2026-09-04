@@ -71,7 +71,7 @@ Journey start dates come from the subject (`Start` / `Starting` + day-first date
 
 ## List updates
 
-A `MutationObserver` on `document.body` re-runs `markTickets` (debounced 300ms) when Freshservice replaces table rows. Re-injecting the script disconnects the previous observer and removes the old host.
+A `MutationObserver` on `document.body` re-runs `markTickets` (debounced 300ms) when Freshservice replaces table rows. Writes to our Start date column and the panel host are ignored so they cannot retrigger paint. Highlight classes are synced in place — they are not cleared before the async API enrich returns. Re-injecting the script disconnects the previous observer and removes the old host.
 
 ## Tests
 
