@@ -25,7 +25,9 @@ extension/
   manifest.json         MV3 shell (version stamped at build)
 ```
 
-Vite bundles `src/content.ts` as an IIFE to `dist/sth-extension/content.js`. A packager then copies the manifest, generates icons, wraps a userscript header, and zips the folder.
+Vite bundles `src/content.ts` as an IIFE to `dist/sth-extension/content.js`. A packager then copies the manifest, `background.js`, generates icons, wraps a userscript header, and zips the folder.
+
+When an API key is saved, `enrichList` overlays `updated_at` / status (tickets) and custom start dates / child-ticket progress (journeys) onto visible rows, and loads off-page matches for **Open marked** and statistics (capped at 500). Without a key, the panel stays DOM-only.
 
 ## Isolation
 

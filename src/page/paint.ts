@@ -1,15 +1,18 @@
 // Human: Highlight matching rows, inject the start column, and reorder the visible table page.
-// Agent: WRITES row/cell CSS classes and tbody child order. CALLS runtime.renderStats after each pass.
+// Agent: WRITES row/cell CSS classes and tbody child order. CALLS enrichList when an API key is available.
 
+import { enrichList } from '../lib/api/enrich';
 import { CELL_MARK, ROW_MARK } from '../lib/constants';
 import { detectModule } from '../lib/detect';
 import { itemMatches } from '../lib/match';
 import { collectRows, rowTbody } from '../lib/rows';
 import { compareItems } from '../lib/sort';
-import { getSettings, page, setLastStats, setModuleId } from '../lib/state';
+import { getLastMarkedUrls, getSettings, page, setLastMarkedUrls, setLastReportables, setLastStats, setModuleId } from '../lib/state';
 import type { RowItem, SortKey } from '../lib/types';
 import { runtime } from './runtime';
 import { injectStartColumn } from './start-column';
+
+let paintGen = 0;
 
 export function clearMarks(doc: Document = document): void {
   doc.querySelectorAll(`.${ROW_MARK}`).forEach((el) => {
@@ -39,9 +42,13 @@ export function sortTableRows(items: RowItem[]): void {
   });
 }
 
-export function paintList(doc: Document = document): void {
+export async function paintList(doc: Document = document, force = false): Promise<void> {
+  const gen = ++paintGen;
   clearMarks(doc);
-  const items = collectRows(doc);
+  const scraped = collectRows(doc);
+  const enrich = await enrichList(scraped, force);
+  if (gen !== paintGen) return;
+  const items = enrich.items;
   const hits = items.filter((item) => itemMatches(item, page()));
   if (page().enabled) {
     hits.forEach((item) => {
@@ -50,25 +57,40 @@ export function paintList(doc: Document = document): void {
       if (item.cell) item.cell.classList.add(CELL_MARK);
     });
   }
-  setLastStats({ tickets: items.length, marked: hits.length });
+  const extraMarked = enrich.extraMarked;
+  setLastStats({
+    tickets: items.length,
+    marked: hits.length,
+    extraMarked,
+    fromApi: enrich.fromApi,
+  });
+  const visibleUrls = hits.map((x) => x.href).filter((u): u is string => !!u);
+  setLastMarkedUrls([...new Set([...visibleUrls, ...enrich.extraUrls])]);
+  setLastReportables(enrich.reportables.length ? enrich.reportables : items, {
+    truncated: enrich.truncated,
+    fromApi: enrich.fromApi,
+  });
   injectStartColumn(items, doc);
   sortTableRows(items);
   runtime.renderStats();
 }
 
-export function markTickets(): void {
+export function markTickets(opts: { force?: boolean } = {}): void {
   setModuleId(detectModule(getSettings().module));
-  paintList();
+  void paintList(document, !!opts.force);
 }
 
 export function openMarked(): void {
-  markTickets();
-  const urls = [...new Set(collectRows().filter((x) => itemMatches(x, page())).map((x) => x.href).filter((u): u is string => !!u))];
-  if (!urls.length) return;
-  if (urls.length > 8 && !confirm(`Open ${urls.length} marked items in new tabs?`)) return;
-  let opened = 0;
-  urls.forEach((url) => {
-    if (window.open(url, '_blank', 'noopener')) opened += 1;
-  });
-  if (opened < urls.length) alert(`Opened ${opened} of ${urls.length} tabs. Allow pop-ups for this site.`);
+  void (async () => {
+    setModuleId(detectModule(getSettings().module));
+    await paintList(document, false);
+    const urls = getLastMarkedUrls();
+    if (!urls.length) return;
+    if (urls.length > 8 && !confirm(`Open ${urls.length} marked items in new tabs?`)) return;
+    let opened = 0;
+    urls.forEach((url) => {
+      if (window.open(url, '_blank', 'noopener')) opened += 1;
+    });
+    if (opened < urls.length) alert(`Opened ${opened} of ${urls.length} tabs. Allow pop-ups for this site.`);
+  })();
 }

@@ -2,11 +2,14 @@
 // Agent: READS/WRITES in-memory settings; persist() writes localStorage. Avoid importing panel from here.
 
 import { loadSettings, saveSettings } from './settings';
-import type { ListStats, ModuleId, PageSettings, Settings } from './types';
+import type { ListStats, ModuleId, PageSettings, Reportable, Settings } from './types';
 
 let settings: Settings | null = null;
 let moduleId: ModuleId = 'tickets';
-let lastStats: ListStats = { tickets: 0, marked: 0 };
+let lastStats: ListStats = { tickets: 0, marked: 0, extraMarked: 0, fromApi: false };
+let lastMarkedUrls: string[] = [];
+let lastReportables: Reportable[] = [];
+let lastReportMeta = { truncated: false, fromApi: false };
 
 export function getSettings(): Settings {
   if (!settings) settings = loadSettings();
@@ -51,4 +54,25 @@ export function getLastStats(): ListStats {
 
 export function setLastStats(stats: ListStats): void {
   lastStats = stats;
+}
+
+export function getLastMarkedUrls(): string[] {
+  return lastMarkedUrls;
+}
+
+export function setLastMarkedUrls(urls: string[]): void {
+  lastMarkedUrls = urls;
+}
+
+export function getLastReportables(): Reportable[] {
+  return lastReportables;
+}
+
+export function setLastReportables(items: Reportable[], meta: { truncated: boolean; fromApi: boolean }): void {
+  lastReportables = items;
+  lastReportMeta = meta;
+}
+
+export function getLastReportMeta(): { truncated: boolean; fromApi: boolean } {
+  return lastReportMeta;
 }

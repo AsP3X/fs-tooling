@@ -1,6 +1,7 @@
 // Human: Scrape Freshservice Ember table rows (tr.et-tr) into RowItem records.
 // Agent: READS document DOM. Idle days prefer "since N days" on the status trigger, else Updated, else Created.
 
+import { parseRecordRef } from './api/ids';
 import { MS_DAY } from './constants';
 import { parseStartDate, parseTicketDate, dateKey } from './dates';
 import { employeeKind, sanitizeTitle } from './text';
@@ -87,10 +88,11 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
           ? (now - created.getTime()) / MS_DAY
           : null;
     const startIn = start ? (start.getTime() - now) / MS_DAY : null;
+    const href = ticketHref(row);
     out.push({
       row,
       cell: updatedEl || createdEl,
-      href: ticketHref(row),
+      href,
       status: rowStatus(row) || '—',
       idleDays,
       created,
@@ -103,6 +105,8 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       initiator: initiatorName(row),
       ord: Number(row.dataset.sthOrd || idx),
       label: sanitizeTitle(title),
+      recordId: parseRecordRef(href)?.id ?? null,
+      fromApi: false,
     });
   });
   return out;

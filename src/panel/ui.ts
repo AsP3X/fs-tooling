@@ -8,11 +8,11 @@ import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
 import { collectRows } from '../lib/rows';
 import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
-import { assignRoot, getLastStats, getModuleId, getSettings, page, patchPage, patchRoot, setModuleId } from '../lib/state';
+import { assignRoot, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, page, patchPage, patchRoot, setModuleId } from '../lib/state';
 import { buildReport } from '../lib/stats';
 import { escapeHtml, fmtDur } from '../lib/text';
 import type { MatchMode, ModuleSetting, PageSettings, Preset, SortDir, SortKey } from '../lib/types';
-import { markTickets, openMarked } from '../page/paint';
+import { markTickets, openMarked, paintList } from '../page/paint';
 import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
@@ -53,10 +53,13 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   }
 
   function renderReport(): void {
-    const r = buildReport(collectRows(), getModuleId());
+    const bundle = getLastReportables();
+    const meta = getLastReportMeta();
+    const r = buildReport(bundle.length ? bundle : collectRows(), getModuleId());
     const hist = loadHistory().filter((h) => h.module === r.module);
     $('reportTitle').textContent = r.module === 'journeys' ? 'Journey statistics' : 'Ticket statistics';
-    $('reportSub').textContent = `${r.n} rows · ${hist.length} snapshots · names not stored`;
+    const src = meta.fromApi ? (meta.truncated ? 'API · capped at 500' : 'API') : 'this page';
+    $('reportSub').textContent = `${r.n} rows · ${src} · ${hist.length} snapshots · names not stored`;
     const extra = r.module === 'journeys' ? `
       <div class="kpi">
         <div class="stat"><b>${r.awaiting}</b><span>Awaiting info</span></div>
@@ -81,7 +84,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       ${barsHtml(r.idleBuckets)}
       <div class="section-title">By status</div>
       ${tableHtml(r.byStatus)}
-      <p class="note">Journeys use the badge “since N days” when present, otherwise created-on. Person names are stripped from stored labels.</p>`;
+      <p class="note">${meta.fromApi ? 'Idle uses ticket updated_at from the API when a key is saved. ' : 'Journeys use the badge “since N days” when present, otherwise created-on. '}Person names are stripped from stored labels.</p>`;
   }
 
   function clampPos(x: number, y: number): { x: number; y: number } {
@@ -117,14 +120,16 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   function renderStats(): void {
     const lastStats = getLastStats();
-    $('fabCount').textContent = String(lastStats.marked);
+    const totalMarked = lastStats.marked + lastStats.extraMarked;
+    $('fabCount').textContent = String(totalMarked);
     const ctx = detectContext(getSettings().module);
     const labels = contextLabel(ctx);
     if (ctx.surface === 'list') {
       const prefix = getSettings().module === 'auto' ? `Auto · ${labels.title}` : labels.title;
-      $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}`;
+      const extra = lastStats.extraMarked ? ` +${lastStats.extraMarked} off-page` : '';
+      $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}${extra}`;
     }
-    $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked` : 'Open marked tabs';
+    $('openStale').textContent = totalMarked ? `Open ${totalMarked} marked` : 'Open marked tabs';
   }
   runtime.renderStats = renderStats;
   runtime.onPageChange = () => { syncUI(); };
@@ -512,7 +517,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     settingsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
-    renderReport();
+    void paintList(document, false).then(() => renderReport());
   });
   $('closeReport').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -550,7 +555,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     void clearApiKey().then(refreshApiKeyStatus);
   });
   $('saveSnap').addEventListener('click', () => {
-    saveSnapshot(buildReport(collectRows(), getModuleId()));
+    const bundle = getLastReportables();
+    saveSnapshot(buildReport(bundle.length ? bundle : collectRows(), getModuleId()));
     renderReport();
   });
   $('clearHist').addEventListener('click', () => {
@@ -558,7 +564,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     localStorage.removeItem(HISTORY_KEY);
     renderReport();
   });
-  $('rescan').addEventListener('click', markTickets);
+  $('rescan').addEventListener('click', () => markTickets({ force: true }));
 
   document.addEventListener('click', (e) => {
     const th = (e.target as Element | null)?.closest?.('th[data-sth-col="start"]');

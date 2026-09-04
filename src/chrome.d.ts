@@ -9,7 +9,7 @@ declare global {
       onMessage: {
         addListener: (
           fn: (
-            message: { type?: string; apiKey?: string },
+            message: { type?: string; apiKey?: string; origin?: string; path?: string; method?: string; body?: string },
             sender: unknown,
             sendResponse: (response: unknown) => void,
           ) => boolean | void,

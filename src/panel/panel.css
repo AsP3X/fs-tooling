@@ -13,7 +13,7 @@
 .fab .label { font-size: 13px; font-weight: 600; pointer-events: none; }
 .panel { width: 320px; border-radius: 18px; overflow: hidden; }
 .panel.hide { display: none; }
-.head { display: flex; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid rgba(255,255,255,.07); cursor: grab; user-select: none; }
+.head { display: flex; align-items: center; gap: 10px; padding: 14px; cursor: grab; user-select: none; }
 .logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent, #e65100); color: #fff; flex: 0 0 auto; pointer-events: none; }
 .titles { flex: 1; min-width: 0; pointer-events: none; }
 .titles h1 { margin: 0; font-size: 13.5px; font-weight: 650; }

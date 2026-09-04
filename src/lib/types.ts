@@ -67,6 +67,8 @@ export interface RowItem {
   initiator: string;
   ord: number;
   label: string;
+  recordId: number | null;
+  fromApi: boolean;
 }
 
 export interface Matchable {
@@ -99,4 +101,15 @@ export interface Snapshot {
 export interface ListStats {
   tickets: number;
   marked: number;
+  extraMarked: number;
+  fromApi: boolean;
+}
+
+export interface Reportable {
+  status: string;
+  idleDays: number | null;
+  startKey: string | null;
+  startIn: number | null;
+  progress: { pct: number | null };
+  kind: string;
 }

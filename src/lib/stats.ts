@@ -2,7 +2,7 @@
 // Agent: PURE. summarize uses a ceiling percentile (p90 index). buildReport filters the live row list only.
 
 import { BUCKETS, PROG_BUCKETS } from './constants';
-import type { ModuleId, RowItem } from './types';
+import type { ModuleId, Reportable } from './types';
 
 export interface Summary {
   n: number;
@@ -62,7 +62,7 @@ export function groupCount(items: Array<Record<string, unknown>>, key: string): 
   return [...map.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
 }
 
-export function buildReport(items: RowItem[], moduleId: ModuleId): Report {
+export function buildReport(items: Reportable[], moduleId: ModuleId): Report {
   const idle = items.map((r) => r.idleDays);
   const prog = items.map((r) => r.progress.pct);
   const startIn = items.map((r) => r.startIn);
