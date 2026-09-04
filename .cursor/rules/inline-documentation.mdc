@@ -1,0 +1,32 @@
+---
+description: Mandatory inline comments (human + optional AI-digestible line) on TypeScript
+globs: "**/*.ts"
+alwaysApply: true
+---
+
+# Inline documentation (required)
+
+**Applies to `*.ts` only.**
+
+**All new or modified code in these files must include clean, human-readable inline comments.** Where behavior is non-trivial, **each such comment must also include an `// Agent:` line** unless redundant.
+
+## What to comment
+
+- **Every non-trivial module, function, or type**: purpose and side effects.
+- **Non-obvious logic**: why something is done, edge cases, ordering constraints.
+- **Sections in longer files**: short header comments before logical blocks.
+
+## AI-oriented line (when applicable)
+
+- **TypeScript:** `// Human:` and `// Agent:`
+
+On the **Agent** line, prefer structured phrasing: `READS`, `WRITES`, `CALLS`, `RETURNS`, failure modes, persisted keys.
+
+## Style
+
+- Place comments **above** the code they describe.
+- Keep comments **up to date** when behavior changes.
+
+## Out of scope
+
+- Do not comment every trivial line. **Do** comment anything another developer would need to edit safely.

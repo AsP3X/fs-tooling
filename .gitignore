@@ -1,5 +1,8 @@
 dist/
+node_modules/
 *.zip
 *.tar.gz
 .DS_Store
-node_modules/
+*.tsbuildinfo
+.vite/
+.eslintcache

@@ -1,0 +1,31 @@
+# Human: Pull-request checks — lint, typecheck, unit tests, and a production extension build.
+# Agent: RUNS on push/PR to master and dev; REQUIRES Node 22; FAILS if npm run check fails.
+
+name: CI
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+
+jobs:
+  check:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Check
+        run: npm run check
+      - name: Verify artifacts
+        run: |
+          test -f dist/sth-extension/manifest.json
+          test -f dist/sth-extension/content.js
+          test -f dist/sth-extension.zip
+          test -f dist/freshservice-mod-dialog.js

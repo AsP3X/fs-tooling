@@ -1,0 +1,12 @@
+---
+description: Repository layout — TypeScript source of truth, generated dist, MV3 shell
+alwaysApply: true
+---
+
+# Project layout
+
+- **Source of truth** is `src/` (TypeScript). Do not edit files under `dist/`.
+- Do not reintroduce a monolithic `script/freshservice-mod-dialog.js`. The userscript is generated at build time from the same bundle as the extension.
+- `extension/manifest.json` is the Manifest V3 shell. The packager stamps `package.json` `version` onto the copy in `dist/sth-extension/`.
+- Load unpacked from `dist/sth-extension/` after `npm run build` or `npm run watch`.
+- Pure logic belongs in `src/lib/` with a colocated `*.test.ts`. Host-page DOM writes belong in `src/page/`. Shadow-DOM UI belongs in `src/panel/`.

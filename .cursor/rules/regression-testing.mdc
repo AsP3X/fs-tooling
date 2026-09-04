@@ -1,0 +1,43 @@
+---
+description: Regression testing requirements when adding or changing features
+alwaysApply: true
+---
+
+# Regression testing
+
+New features and refactors must **not break existing behavior**. Treat regression protection as part of the feature, not optional cleanup.
+
+## Mindset
+
+- **Preserve contracts**: matching rules (AND/OR), start-date parsing from titles only, localStorage keys (`sth-settings-v2`, `sth-history-v2`), and user-visible panel behavior must still work after your change—unless the task explicitly documents a breaking change.
+- **Test the blast radius, not just the diff**: Ask what existing code paths your change touches (row scraping, date parsing, match, sort, panel sync).
+
+## Test inventory (this repo)
+
+| Area | Automated checks | Notes |
+| --- | --- | --- |
+| **Pure lib** (`src/lib/`) | `npm run test` | Dates, match, settings merge, sort, stats, detect, row fixtures |
+| **Extension package** | `npm run build` | `dist/sth-extension/` must contain `manifest.json` + `content.js` |
+| **Lint / types** | `npm run lint`, `npm run typecheck` | Required on PRs |
+
+```bash
+npm run check
+```
+
+## Verification matrix (by change type)
+
+| You changed… | Required checks |
+| --- | --- |
+| **Date parsing, match, sort, settings** | Add/extend unit tests; `npm run test` |
+| **DOM scraping (`rows.ts`, start column)** | jsdom fixture test; load unpacked extension on a tickets and a journeys list |
+| **Panel UI** | `npm run build`; manual smoke of filters, collapse, statistics |
+| **Manifest / build** | `npm run build`; confirm zip still loads unpacked |
+| **Cross-cutting refactor** | `npm run check` plus tickets + journeys smoke |
+
+## Manual smoke paths
+
+1. **Tickets** — Idle highlight, status tags, AND/OR, saved views, sort, open marked tabs.
+2. **Journeys** — Start date column, start-date tags, extras (progress / start within), statistics without storing names.
+3. **Reload** — Rebuild, reload the extension card, refresh Freshservice; a single panel instance remains.
+
+Report which commands and smokes you ran when claiming completion.

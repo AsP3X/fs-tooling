@@ -1,13 +1,15 @@
-# Freshservice Ops Panel — unpacked extension
+# Unpacked extension
 
-Manifest V3 content script. Injects the panel on Freshservice / Freshworks ticket and journey lists.
+This folder is the **Manifest V3 shell** (`manifest.json`). The loadable package is built into `dist/sth-extension/`.
 
-## Load in Chrome or Edge
+## Load in Chrome or Edge (development)
 
-1. Unpack `sth-extension.zip` from the latest GitHub Release. `manifest.json` must be in the folder you select.
+1. From the repo root: `npm install` then `npm run build` (or `npm run watch`).
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Turn on **Developer mode**.
-4. Click **Load unpacked** and select this folder.
-5. Open `/a/tickets` or an Employee Onboarding / Journeys list.
+4. Click **Load unpacked** and select `dist/sth-extension`.
+5. Open a Freshservice `/a/tickets` list or an Employee Onboarding / Journeys list.
 
-After you edit `content.js`, click **Reload** on the extension card, then refresh Freshservice.
+After you change source, rebuild (watch does this automatically), click **Reload** on the extension card, then refresh Freshservice.
+
+End-user zip installs: [Getting started](../docs/getting-started.md).

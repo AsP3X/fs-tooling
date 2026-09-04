@@ -1,0 +1,121 @@
+<div class="fab" id="fab"><span class="dot" id="fabCount">0</span><span class="label" id="fabLabel">Ops panel</span></div>
+<section class="panel" id="panel">
+  <header class="head" id="dragHandle">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    <div class="titles"><h1 id="panelTitle">Ops panel</h1><p id="panelSub">Detecting list…</p></div>
+    <button class="icon-btn" id="collapse" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+  </header>
+  <div class="body">
+    <div class="row-between"><span class="label">Page</span>
+      <div class="seg" id="moduleSeg">
+        <button type="button" data-module="auto">Auto</button>
+        <button type="button" data-module="tickets">Tickets</button>
+        <button type="button" data-module="journeys">Journeys</button>
+      </div>
+    </div>
+    <div class="row-between"><span class="label">Highlight</span><button class="toggle" id="enabled"><i></i></button></div>
+    <div class="card tagbox" data-sec="age">
+      <button type="button" class="tagbox-head" data-toggle="age">
+        <span class="label" id="daysCaption">Age</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="daysLabel">6d</span><span class="chev">▸</span></span>
+      </button>
+      <div class="tagbox-body">
+        <input type="range" id="days" min="1" max="45" step="1" />
+        <div class="chips" id="dayChips"></div>
+      </div>
+    </div>
+    <div class="card tagbox" data-sec="match">
+      <button type="button" class="tagbox-head" data-toggle="match">
+        <span class="label">Match & views</span>
+        <span class="chev">▸</span>
+      </button>
+      <div class="tagbox-body">
+        <div class="row-between"><span class="label">Match</span>
+          <div class="seg" id="matchMode">
+            <button type="button" data-mode="and">All</button>
+            <button type="button" data-mode="or">Any</button>
+          </div>
+        </div>
+        <p class="hint" id="matchHint"></p>
+        <div class="chips" id="viewPresets"></div>
+        <div class="chips">
+          <button class="ghost" id="saveView" type="button" style="height:28px;flex:1">Save</button>
+          <button class="ghost" id="deleteView" type="button" style="height:28px;flex:1">Delete</button>
+        </div>
+      </div>
+    </div>
+    <div class="card tagbox" id="extraFilters" data-sec="extra"></div>
+    <div class="card tagbox" id="sortBox" data-sec="sort">
+      <button type="button" class="tagbox-head" data-toggle="sort">
+        <span class="label">Sort</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="sortBadge">Default</span><span class="chev">▸</span></span>
+      </button>
+      <div class="tagbox-body">
+        <div class="seg" id="sortDir">
+          <button type="button" data-dir="asc">A→Z</button>
+          <button type="button" data-dir="desc">Z→A</button>
+        </div>
+        <div class="chips" id="sortKeys"></div>
+        <p class="hint" id="sortHint">Reorders rows on this page only.</p>
+      </div>
+    </div>
+    <div class="card tagbox" id="statusBox" data-sec="status">
+      <button type="button" class="tagbox-head" data-toggle="status">
+        <span class="label" id="statusLabel">Status</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="statusCount">0</span><span class="chev">▸</span></span>
+      </button>
+      <div class="tagbox-body">
+        <div class="tags" id="statusTags"></div>
+        <input id="statusInput" type="text" placeholder="Add status · Enter" autocomplete="off" spellcheck="false" />
+        <div class="chips" id="statusHints"></div>
+      </div>
+    </div>
+    <div class="card tagbox" id="startBox" data-sec="start">
+      <button type="button" class="tagbox-head" data-toggle="start">
+        <span class="label" id="startLabel">Start date</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="startCount">0</span><span class="chev">▸</span></span>
+      </button>
+      <div class="tagbox-body">
+        <p class="hint">From the title: Start DD-MM-YYYY.</p>
+        <div class="tags" id="startTags"></div>
+        <input id="startInput" type="text" placeholder="14-09-2026 · Enter" autocomplete="off" spellcheck="false" />
+        <div class="chips" id="startHints"></div>
+      </div>
+    </div>
+    <div class="card tagbox" data-sec="color">
+      <button type="button" class="tagbox-head" data-toggle="color">
+        <span class="label">Color</span>
+        <span class="chev">▸</span>
+      </button>
+      <div class="tagbox-body">
+        <div class="chips">
+          <button class="swatch" data-color="#e65100" style="background:#e65100"></button>
+          <button class="swatch" data-color="#c62828" style="background:#c62828"></button>
+          <button class="swatch" data-color="#6a1b9a" style="background:#6a1b9a"></button>
+          <button class="swatch" data-color="#1565c0" style="background:#1565c0"></button>
+          <button class="swatch" data-color="#2e7d32" style="background:#2e7d32"></button>
+          <input type="color" id="customColor" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <button class="primary" id="openStale">Open marked tabs</button>
+    <div class="foot-row">
+      <button class="ghost" id="openStats">Statistics</button>
+      <button class="ghost" id="rescan">Rescan</button>
+    </div>
+  </div>
+</section>
+<section class="panel report" id="report">
+  <header class="head" id="reportHandle">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    <div class="titles"><h1 id="reportTitle">Statistics</h1><p id="reportSub">Live snapshot</p></div>
+    <button class="icon-btn" id="closeReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </header>
+  <div class="body" id="reportBody"></div>
+  <div class="foot">
+    <button class="primary" id="saveSnap">Save snapshot</button>
+    <button class="ghost" id="clearHist">Clear history</button>
+  </div>
+</section>
