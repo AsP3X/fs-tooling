@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      2.3.2
+// @version      2.3.4
 // @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
@@ -21,7 +21,6 @@
   const RANGE_BANNER_ID = `${NS}-range-banner`;
   const HIDE_ATTR = `data-${NS}-hidden`;
   const SRC_ATTR = `data-${NS}-src`;
-  const MAX_HARVEST_PAGES = 40;
   const STORAGE_KEY = `${NS}-settings-v2`;
   const HISTORY_KEY = `${NS}-history-v2`;
   const MS_DAY = 86400000;
@@ -455,26 +454,6 @@
     return null;
   }
 
-  function journeyShell() {
-    const header = journeyHeaderTable();
-    const body = journeyBodyTable();
-    const wrapOf = (el) => el?.closest('.ember-table, .et-table, [class*="ember-table"]');
-    const hWrap = wrapOf(header);
-    const bWrap = wrapOf(body);
-    if (hWrap && bWrap && (hWrap === bWrap || hWrap.contains(bWrap))) return hWrap;
-    if (bWrap && hWrap && bWrap.contains(hWrap)) return bWrap;
-    if (header && body && header !== body) {
-      let p = header.parentElement;
-      let steps = 0;
-      while (p && steps < 6 && p !== document.body) {
-        if (p.contains(body)) return p;
-        p = p.parentElement;
-        steps += 1;
-      }
-    }
-    return hWrap || bWrap || body || header;
-  }
-
   function visibleJourneyTable() {
     return document.getElementById(RANGE_TABLE_ID)
       || journeyBodyTable()
@@ -671,37 +650,15 @@
     return match;
   }
 
-  const ONBOARD_STATUS = {
-    1: 'Awaiting Information',
-    2: 'Cancelled',
-    3: 'Being Processed',
-    4: 'Closed'
-  };
-
-  let rangeToken = 0;
-  let rangeBusy = false;
-  let rangeComplete = false;
   let rangeViewKey = '';
-  let rangeScanned = 0;
-  let didWalkPages = false;
   let lastStats = { tickets: 0, marked: 0, hidden: 0 };
-  let livePageId = '';
-  let livePageHrefs = new Set();
-  let liveFingerprint = '';
-  let pendingPageChange = false;
 
   function rangeKey() {
     return `${page().startFrom || ''}|${page().startTo || ''}`;
   }
 
   function sourceTable() {
-    return journeyBodyTable()
-      || document.querySelector(`table[${SRC_ATTR}="1"]`)
-      || journeyHeaderTable();
-  }
-
-  function rowHrefOf(row) {
-    return ticketHref(row) || '';
+    return journeyBodyTable() || journeyHeaderTable();
   }
 
   function sanitizeClone(tr) {
@@ -712,138 +669,40 @@
     return tr;
   }
 
-  function waitFor(pred, timeout = 8000) {
-    return new Promise((resolve) => {
-      const t0 = Date.now();
-      const tick = () => {
-        if (pred()) return resolve(true);
-        if (Date.now() - t0 > timeout) return resolve(false);
-        setTimeout(tick, 120);
-      };
-      tick();
-    });
+  function fingerprint(root) {
+    const scope = root || journeyBodyTable();
+    if (!scope) return '';
+    return [...scope.querySelectorAll('tr.et-tr a[href]')]
+      .filter((a) => !a.closest(`#${RANGE_TABLE_ID}`))
+      .map((a) => a.getAttribute('href'))
+      .join('|');
   }
 
-  function pageCountInfo() {
-    const re = /(\d+)\s*[–-]\s*(\d+)\s+of\s+(\d+)/i;
-    const nodes = document.querySelectorAll('span, div, p, label');
-    for (const el of nodes) {
-      if (el.children.length) continue;
-      const raw = el.dataset.sthCountOrig || el.textContent || '';
-      const m = String(raw).match(re);
-      if (m) return { from: +m[1], to: +m[2], total: +m[3], el };
-    }
-    return null;
-  }
-
-  function liveJourneyTable() {
-    const staticTbl = document.getElementById(RANGE_TABLE_ID);
-    const src = journeyBodyTable();
-    if (!src || src === staticTbl) return null;
-    return src;
-  }
-
-  function currentPageId() {
-    const info = pageCountInfo();
-    const pager = info ? `${info.from}-${info.to}/${info.total}` : '';
-    return `${location.pathname}${location.search}|${pager}`;
-  }
-
-  function dropStaleLiveRows() {
-    const table = liveJourneyTable() || (
-      document.getElementById(RANGE_TABLE_ID)
-        ? null
-        : document.querySelector('thead th[data-name="subject"]')?.closest('table')
-    );
-    if (!table || table.id === RANGE_TABLE_ID) return;
-    const fp = fingerprint(table);
-    if (pendingPageChange && liveFingerprint && fp === liveFingerprint) return;
-    const id = currentPageId();
-    const rows = [...table.querySelectorAll('tbody tr.et-tr')];
-    const pageChanged = pendingPageChange || (livePageId && id !== livePageId);
-    if (pageChanged && livePageHrefs.size) {
-      rows.forEach((row) => {
-        const href = ticketHref(row);
-        if (href && livePageHrefs.has(href)) row.remove();
-      });
-      table.querySelectorAll('tbody tr.et-tr').forEach((row) => {
-        delete row.dataset.sthOrd;
-      });
-      pendingPageChange = false;
-    }
-    const kept = [...table.querySelectorAll('tbody tr.et-tr')];
-    livePageId = id;
-    livePageHrefs = new Set(kept.map(ticketHref).filter(Boolean));
-    liveFingerprint = fingerprint(table);
-  }
-
-  function rewriteCountLabels(shown) {
-    const re = /^\s*\d+\s*[–-]\s*\d+\s+of\s+\d+\s*$/;
-    document.querySelectorAll('span, div, p, label').forEach((el) => {
-      if (el.children.length) return;
-      if (!re.test(el.textContent || '')) return;
-      if (el.dataset.sthCountOrig == null) el.dataset.sthCountOrig = el.textContent;
-      el.textContent = shown ? `1–${shown} of ${shown}` : '0 of 0';
-    });
-  }
-
-  function restoreCountLabels() {
-    document.querySelectorAll('[data-sth-count-orig]').forEach((el) => {
-      el.textContent = el.dataset.sthCountOrig;
-      delete el.dataset.sthCountOrig;
-    });
-  }
-
-  function pagerRoots() {
-    const roots = new Set();
-    document.querySelectorAll('.pagination, [data-test-id="pagination"], .pagination-container, .list-pagination, nav[aria-label*="agination" i]').forEach((el) => roots.add(el));
-    const next = document.querySelector('[aria-label="Next"], [aria-label="Next page"], [rel="next"], [data-test-id="next-page"]');
-    if (next) roots.add(next.closest('nav, .pagination, [class*="pag"]') || next.parentElement);
-    return [...roots].filter((el) => el && !el.closest?.(`#${HOST_ID}`) && el.id !== RANGE_BANNER_ID);
-  }
-
-  function nextPageButton() {
-    const el = document.querySelector('[aria-label="Next page"], [aria-label="Next"], [rel="next"], [data-test-id="next-page"], .pagination .next, .pagination [class*="next"]');
-    if (!el || el.closest?.(`#${HOST_ID}`)) return null;
-    if (el.disabled || el.getAttribute('aria-disabled') === 'true' || el.classList.contains('disabled')) return null;
-    return el;
-  }
-
-  function firstPageButton() {
-    return document.querySelector('[aria-label="First page"], [aria-label="First"], .pagination .first, [data-test-id="first-page"]');
-  }
-
-  function hasNextPage() {
-    const info = pageCountInfo();
-    if (info && info.to >= info.total) return false;
-    return !!nextPageButton();
+  function liveListKey() {
+    return `${location.pathname}${location.search}|${rangeKey()}|${fingerprint(journeyBodyTable())}`;
   }
 
   function setHiddenFlag(el, on) {
     if (!el) return;
     if (on) el.setAttribute(HIDE_ATTR, '1');
-    else el.removeAttribute(HIDE_ATTR);
+    else {
+      el.removeAttribute(HIDE_ATTR);
+      el.removeAttribute(SRC_ATTR);
+    }
   }
 
   function hideSourceChrome(on) {
     const targets = new Set();
-    const shell = journeyShell();
-    const header = journeyHeaderTable();
-    const body = journeyBodyTable();
-    if (shell && shell !== document.body && shell !== document.documentElement) targets.add(shell);
-    if (header) targets.add(header);
-    if (body) targets.add(body);
-    [header, body].forEach((el) => {
-      const wrap = el?.closest('.ember-table-overflow, .et-table-scroll, .ember-table');
-      if (wrap && wrap !== document.body) targets.add(wrap);
+    [journeyHeaderTable(), journeyBodyTable()].forEach((el) => {
+      if (!el) return;
+      const wrap = el.closest('.ember-table-overflow, .et-table-scroll, .ember-table, .et-table') || el;
+      if (wrap && wrap !== document.body && wrap.id !== RANGE_TABLE_ID) targets.add(wrap);
     });
     targets.forEach((el) => {
-      if (!el || el.id === RANGE_TABLE_ID || el.closest?.(`#${RANGE_TABLE_ID}`)) return;
+      if (el.closest?.(`#${RANGE_TABLE_ID}`)) return;
       if (on) el.setAttribute(SRC_ATTR, '1');
       setHiddenFlag(el, on);
     });
-    pagerRoots().forEach((el) => setHiddenFlag(el, on));
-    document.querySelectorAll('occluded-content').forEach((el) => setHiddenFlag(el, on));
   }
 
   function setRangeBanner(text) {
@@ -852,8 +711,7 @@
       el?.remove();
       return;
     }
-    const shell = journeyShell();
-    const src = shell || journeyHeaderTable() || sourceTable();
+    const src = journeyHeaderTable() || journeyBodyTable() || sourceTable();
     if (!el) {
       el = document.createElement('div');
       el.id = RANGE_BANNER_ID;
@@ -865,7 +723,6 @@
   function mountStaticRows(rowEls) {
     const headerTable = journeyHeaderTable();
     const bodyTable = journeyBodyTable();
-    const shell = journeyShell();
     const src = headerTable || bodyTable;
     if (!src) return null;
     const inRangeRows = rowEls.filter((row) => startInRange({ startKey: dateKey(parseStartDate(rowTitle(row))) }));
@@ -878,7 +735,7 @@
       const thead = headerTable?.querySelector('thead') || src.querySelector('thead');
       if (thead) table.appendChild(thead.cloneNode(true));
       table.appendChild(document.createElement('tbody'));
-      const before = shell || headerTable || bodyTable || src;
+      const before = headerTable || bodyTable || src;
       before.parentNode.insertBefore(table, before);
     }
     if (!table.querySelector('thead th[data-name="subject"]')) {
@@ -894,263 +751,30 @@
       tbody.appendChild(tr);
     });
     hideSourceChrome(true);
-    rewriteCountLabels(inRangeRows.length);
+    const range = formatRangeLabel(page().startFrom, page().startTo);
+    const extra = inRangeRows.length === 1 ? '' : 's';
+    setRangeBanner(inRangeRows.length
+      ? `Showing ${inRangeRows.length} request${extra} with start date ${range} in this Freshservice view.`
+      : `No requests with start date ${range} in this Freshservice view.`);
     return table;
   }
 
   function teardownRangeView() {
     const hadView = !!(document.getElementById(RANGE_TABLE_ID) || rangeViewKey);
-    if (!hadView && !didWalkPages) return;
-    rangeToken += 1;
-    rangeBusy = false;
-    rangeComplete = false;
     rangeViewKey = '';
-    rangeScanned = 0;
     document.getElementById(RANGE_TABLE_ID)?.remove();
     setRangeBanner('');
-    restoreCountLabels();
     hideSourceChrome(false);
-    document.querySelectorAll(`[${HIDE_ATTR}="1"]`).forEach((el) => el.removeAttribute(HIDE_ATTR));
-    document.querySelectorAll(`tr.${HIDE_MARK}`).forEach((el) => el.classList.remove(HIDE_MARK));
-    if (didWalkPages) {
-      didWalkPages = false;
-      pendingPageChange = true;
-      firstPageButton()?.click();
-    }
-  }
-
-  function recordSubject(rec) {
-    return rec.subject || rec.title || rec.ticket_subject || rec.name || rec.attributes?.subject || '';
-  }
-
-  function recordStartKey(rec) {
-    return dateKey(parseStartDate(recordSubject(rec)));
-  }
-
-  function recordInRange(rec) {
-    return startInRange({ startKey: recordStartKey(rec) });
-  }
-
-  function recordHref(rec) {
-    if (rec.ticket_id) return new URL(`/a/tickets/${rec.ticket_id}`, location.origin).href;
-    if (rec.id && /onboarding/i.test(location.pathname)) return new URL(`/a/employee_onboarding/${rec.id}`, location.origin).href;
-    return '';
-  }
-
-  function fillRowFromRecord(tr, rec) {
-    const subject = recordSubject(rec);
-    const href = recordHref(rec);
-    const a = tr.querySelector('a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"], a[href*="/journeys/"]');
-    if (a) {
-      const label = sanitizeTitle(subject) || subject;
-      a.textContent = label;
-      a.setAttribute('title', subject || label);
-      if (href) a.setAttribute('href', href);
-    }
-    const titleHolders = tr.querySelectorAll('td[data-name="subject"] [title], td[data-name="ticket_subject"] [title]');
-    titleHolders.forEach((el) => el.setAttribute('title', subject));
-    const statusName = ONBOARD_STATUS[rec.status] || rec.status_name || rec.request_status || (typeof rec.status === 'string' ? rec.status : '');
-    if (statusName) {
-      const badge = tr.querySelector('[data-test-id="state-cell"] span, .status-result, td[data-name="status"] [title], td[data-name="status"]');
-      if (badge) {
-        badge.textContent = statusName;
-        if (badge.hasAttribute('title')) badge.setAttribute('title', statusName);
-      }
-    }
-    const created = rec.created_at ? prettyStart(new Date(rec.created_at)) : '';
-    if (created) {
-      const cell = tr.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
-      if (cell) {
-        cell.textContent = created;
-        cell.setAttribute('title', created);
-      }
-    }
-    const initiator = rec.initiator_name || rec.requester_name || rec.actors && Object.values(rec.actors)[0]?.name || '';
-    if (initiator) {
-      const cell = tr.querySelector('.requester-cell-name, td[data-name="initiator"] a, td[data-name="initiator"]');
-      if (cell) cell.textContent = initiator;
-    }
-    const start = parseStartDate(subject);
-    const startKey = dateKey(start);
-    let startTd = tr.querySelector('td[data-sth-col="start"]');
-    const subjectTd = tr.querySelector('td[data-name="subject"]');
-    if (!startTd && subjectTd) {
-      startTd = document.createElement('td');
-      startTd.dataset.sthCol = 'start';
-      startTd.className = 'ember-view sth-start-cell';
-      subjectTd.after(startTd);
-    }
-    if (startTd) {
-      if (startKey) startTd.dataset.startKey = startKey;
-      else delete startTd.dataset.startKey;
-      const label = prettyStart(start);
-      startTd.innerHTML = label
-        ? `<span title="Start ${formatStart(startKey)}">${label}</span>`
-        : '<span class="sth-empty">—</span>';
-    }
-    return tr;
-  }
-
-  function extractList(data) {
-    if (!data) return [];
-    if (Array.isArray(data)) return data;
-    if (typeof data !== 'object') return [];
-    for (const k of ['onboarding_requests', 'journey_requests', 'tickets', 'requests', 'items', 'records']) {
-      if (Array.isArray(data[k])) return data[k];
-    }
-    if (Array.isArray(data.data)) {
-      return data.data.map((x) => (x && x.attributes ? { id: x.id, ...x.attributes } : x));
-    }
-    return [];
-  }
-
-  function listUrlCandidates() {
-    const out = [];
-    for (const e of performance.getEntriesByType('resource')) {
-      const n = e.name;
-      if (!/onboarding_requests|journeys\/requests/i.test(n)) continue;
-      if (/\/form\b|\/configs\b/.test(n)) continue;
-      try {
-        const u = new URL(n, location.origin);
-        u.searchParams.delete('page');
-        u.searchParams.delete('per_page');
-        out.push(u.toString());
-      } catch { /* ignore */ }
-    }
-    return [...new Set(out)];
-  }
-
-  async function fetchJson(url) {
-    const headers = { Accept: 'application/json' };
-    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-    const res = await fetch(url, { credentials: 'include', headers });
-    if (!res.ok) throw new Error(String(res.status));
-    const ct = res.headers.get('content-type') || '';
-    if (!/json/i.test(ct)) throw new Error('not-json');
-    return res.json();
-  }
-
-  async function fetchAllPages(base) {
-    const out = [];
-    const origin = new URL(base, location.origin);
-    for (let p = 1; p <= MAX_HARVEST_PAGES; p++) {
-      origin.searchParams.set('page', String(p));
-      origin.searchParams.set('per_page', '100');
-      const data = await fetchJson(origin.toString());
-      const list = extractList(data);
-      if (!list.length) break;
-      out.push(...list);
-      if (list.length < 100) break;
-    }
-    return out;
-  }
-
-  async function harvestByApi(token, template) {
-    if (!template) return null;
-    const urls = listUrlCandidates();
-    for (const base of urls) {
-      if (token !== rangeToken) return null;
-      try {
-        const records = await fetchAllPages(base);
-        if (!records.length) continue;
-        const rows = records.filter((rec) => recordStartKey(rec) && recordInRange(rec)).map((rec) => sanitizeClone(fillRowFromRecord(template.cloneNode(true), rec)));
-        return { rows, scanned: records.length, complete: true };
-      } catch {
-        continue;
-      }
-    }
-    return null;
-  }
-
-  function fingerprint(root) {
-    return [...(root || document).querySelectorAll('tr.et-tr a[href]')].map((a) => a.getAttribute('href')).join('|');
-  }
-
-  async function harvestByPager(token, map) {
-    const src = () => journeyBodyTable() || sourceTable();
-    let scanned = collectRows(src() || document).length;
-    let pages = 1;
-    while (pages < MAX_HARVEST_PAGES) {
-      if (token !== rangeToken) return { scanned, complete: false };
-      const btn = nextPageButton();
-      if (!btn) break;
-      const before = fingerprint(src());
-      pendingPageChange = true;
-      btn.click();
-      didWalkPages = true;
-      const moved = await waitFor(() => fingerprint(src()) !== before, 10000);
-      if (!moved) break;
-      dropStaleLiveRows();
-      pages += 1;
-      const items = collectRows(src() || document);
-      scanned += items.length;
-      items.filter(startInRange).forEach((item) => {
-        const k = item.href || `${item.startKey}|${item.label}`;
-        if (!map.has(k)) map.set(k, sanitizeClone(item.row.cloneNode(true)));
-      });
-      setRangeBanner(`Scanning page ${pages}… ${map.size} in range so far`);
-    }
-    const complete = !nextPageButton();
-    const first = firstPageButton();
-    if (didWalkPages && first && !first.disabled && first.getAttribute('aria-disabled') !== 'true') {
-      const before = fingerprint(src());
-      pendingPageChange = true;
-      first.click();
-      await waitFor(() => fingerprint(src()) !== before, 8000);
-      dropStaleLiveRows();
-    }
-    return { scanned, complete };
-  }
-
-  function bannerText(shown, scanned, complete) {
-    const range = formatRangeLabel(page().startFrom, page().startTo);
-    if (!shown) return `No requests with start date ${range}.`;
-    if (complete) return `Showing ${shown} request${shown === 1 ? '' : 's'} with start date ${range}. Pagination off.`;
-    return `Showing ${shown} in range on scanned pages (${scanned} scanned).`;
-  }
-
-  async function harvestAndFill(initialItems) {
-    if (rangeBusy) return;
-    rangeBusy = true;
-    const token = ++rangeToken;
-    const map = new Map();
-    initialItems.filter(startInRange).forEach((item) => {
-      const k = item.href || `${item.startKey}|${item.label}`;
-      map.set(k, sanitizeClone(item.row.cloneNode(true)));
+    document.querySelectorAll(`[${HIDE_ATTR}="1"]`).forEach((el) => {
+      el.removeAttribute(HIDE_ATTR);
+      el.removeAttribute(SRC_ATTR);
     });
-    setRangeBanner(`Loading start dates ${formatRangeLabel(page().startFrom, page().startTo)}…`);
-    let scanned = initialItems.length;
-    let complete = !hasNextPage();
-    try {
-      const template = initialItems[0]?.row || sourceTable()?.querySelector('tr.et-tr');
-      const api = await harvestByApi(token, template);
-      if (api) {
-        scanned = Math.max(scanned, api.scanned);
-        api.rows.forEach((row) => {
-          const k = rowHrefOf(row) || row.textContent.replace(/\s+/g, ' ').trim().slice(0, 120);
-          if (k && !map.has(k)) map.set(k, row);
-        });
-        complete = api.complete;
-      }
-      if (!complete && hasNextPage()) {
-        const walked = await harvestByPager(token, map);
-        scanned = Math.max(scanned, walked.scanned);
-        complete = walked.complete;
-      }
-    } catch {
-      complete = false;
-    }
-    if (token !== rangeToken) {
-      rangeBusy = false;
-      return;
-    }
-    rangeComplete = complete;
-    rangeScanned = scanned;
-    mountStaticRows([...map.values()]);
-    setRangeBanner(bannerText(map.size, scanned, complete));
-    rangeBusy = false;
-    paintList();
+    document.querySelectorAll(`tr.${HIDE_MARK}`).forEach((el) => el.classList.remove(HIDE_MARK));
+    document.querySelectorAll('[data-sth-count-orig]').forEach((el) => {
+      el.textContent = el.dataset.sthCountOrig;
+      delete el.dataset.sthCountOrig;
+    });
+    return hadView;
   }
 
   function listedRows() {
@@ -1169,11 +793,7 @@
 
   function paintList() {
     clearMarks();
-    let items = collectRows();
-    if (moduleId === 'journeys' && rangeActive()) {
-      items.filter((item) => !startInRange(item)).forEach((item) => item.row.remove());
-      items = items.filter((item) => startInRange(item) && item.row.isConnected);
-    }
+    const items = collectRows();
     const hits = items.filter(itemMatches);
     if (page().enabled) {
       hits.forEach((item) => {
@@ -1182,8 +802,7 @@
         if (item.cell) item.cell.classList.add(CELL_MARK);
       });
     }
-    const hidden = Math.max(0, rangeScanned - items.length);
-    lastStats = { tickets: items.length, marked: hits.length, hidden };
+    lastStats = { tickets: items.length, marked: hits.length, hidden: 0 };
     injectStartColumn(items);
     sortTableRows(items);
     renderStats();
@@ -1191,31 +810,23 @@
 
   function markTickets() {
     moduleId = detectModule();
-    dropStaleLiveRows();
     if (moduleId !== 'journeys' || !rangeActive()) {
       teardownRangeView();
-      rangeScanned = 0;
       paintList();
       return;
     }
-    const key = rangeKey();
+    const key = liveListKey();
     const staticTable = document.getElementById(RANGE_TABLE_ID);
     if (staticTable && rangeViewKey === key) {
       paintList();
       return;
     }
-    const src = journeyBodyTable() || sourceTable();
-    const sourceItems = collectRows(src || document);
+    const src = journeyBodyTable();
+    const sourceItems = src ? collectRows(src) : [];
     rangeViewKey = key;
-    rangeComplete = false;
-    rangeScanned = sourceItems.length;
     const kept = sourceItems.filter(startInRange);
     mountStaticRows(kept.map((item) => sanitizeClone(item.row.cloneNode(true))));
-    if (!document.getElementById(RANGE_TABLE_ID)) {
-      sourceItems.forEach((item) => item.row.classList.toggle(HIDE_MARK, !startInRange(item)));
-    }
     paintList();
-    void harvestAndFill(sourceItems);
   }
 
   function sortValue(item, key) {
@@ -1235,11 +846,7 @@
     items.forEach((item) => {
       const body = rowTbody(item.row);
       if (!body) return;
-      const inStatic = !!body.closest(`#${RANGE_TABLE_ID}`);
-      if (!inStatic) {
-        if (key === 'default') return;
-        if (rangeBusy) return;
-      }
+      if (!body.closest(`#${RANGE_TABLE_ID}`)) return;
       if (!groups.has(body)) groups.set(body, []);
       groups.get(body).push(item);
     });
@@ -1519,7 +1126,7 @@
             <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="startCount">0</span><span class="chev">▸</span></span>
           </button>
           <div class="tagbox-body">
-            <p class="hint">From / to rebuilds the list to only those start dates. Extra pages are scanned so pagination can turn off when everything fits. Same control: Filter on the column, or right-click a start date.</p>
+            <p class="hint">From / to shows this Freshservice view’s rows whose start date is in range. Native filters and pagination stay in charge; clear the range to see the full view. Same control: Filter on the column, or right-click a start date.</p>
             <div class="range-row">
               <label class="range-field"><span>From</span><input id="startFrom" type="date" /></label>
               <label class="range-field"><span>To</span><input id="startTo" type="date" /></label>
@@ -1979,7 +1586,6 @@
   });
   $('rescan').addEventListener('click', () => {
     rangeViewKey = '';
-    rangeComplete = false;
     document.getElementById(RANGE_TABLE_ID)?.remove();
     markTickets();
   });
@@ -2098,10 +1704,6 @@
   }
 
   document.addEventListener('click', (e) => {
-    const pager = e.target.closest?.('.pagination, [data-test-id="pagination"], [aria-label="Next"], [aria-label="Previous"], [aria-label="Next page"], [aria-label="Previous page"], [rel="next"], [rel="prev"], [data-test-id="next-page"], [data-test-id="prev-page"]');
-    if (pager && !pager.closest(`#${HOST_ID}`) && !pager.closest(`#${RANGE_POP_ID}`)) {
-      pendingPageChange = true;
-    }
     const th = e.target.closest?.('th[data-sth-col="start"]');
     if (!th) return;
     e.preventDefault();
