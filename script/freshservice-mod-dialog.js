@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      2.3.4
+// @version      2.4.0
 // @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
@@ -15,12 +15,6 @@
   const STYLE_ID = `${NS}-page-style`;
   const ROW_MARK = `${NS}-row`;
   const CELL_MARK = `${NS}-cell`;
-  const HIDE_MARK = `${NS}-hide`;
-  const RANGE_POP_ID = `${NS}-range-pop`;
-  const RANGE_TABLE_ID = `${NS}-static-table`;
-  const RANGE_BANNER_ID = `${NS}-range-banner`;
-  const HIDE_ATTR = `data-${NS}-hidden`;
-  const SRC_ATTR = `data-${NS}-src`;
   const STORAGE_KEY = `${NS}-settings-v2`;
   const HISTORY_KEY = `${NS}-history-v2`;
   const MS_DAY = 86400000;
@@ -74,8 +68,6 @@
     maxProgress: null,
     startWithin: null,
     startDates: [],
-    startFrom: null,
-    startTo: null,
     startOpen: false,
     sortKey: 'default',
     sortDir: 'asc'
@@ -111,8 +103,6 @@
     if (!Array.isArray(settings[k].statuses)) settings[k].statuses = [];
     if (!Array.isArray(settings[k].presets)) settings[k].presets = [];
     if (!Array.isArray(settings[k].startDates)) settings[k].startDates = [];
-    settings[k].startFrom = validDateKey(settings[k].startFrom);
-    settings[k].startTo = validDateKey(settings[k].startTo);
     if (settings[k].matchMode !== 'and') settings[k].matchMode = 'or';
     if (!settings[k].sortKey) settings[k].sortKey = 'default';
     if (settings[k].sortDir !== 'desc') settings[k].sortDir = 'asc';
@@ -120,7 +110,6 @@
 
   document.getElementById(HOST_ID)?.remove();
   document.getElementById(STYLE_ID)?.remove();
-  document.getElementById(RANGE_POP_ID)?.remove();
   window.__staleTicketObserver?.disconnect();
 
   const pageStyle = document.createElement('style');
@@ -198,53 +187,6 @@
     return dateKey(parseStartDate('Start ' + str));
   }
 
-  function validDateKey(v) {
-    return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
-  }
-
-  function normalizeRange(from, to) {
-    let startFrom = validDateKey(from);
-    let startTo = validDateKey(to);
-    if (startFrom && startTo && startFrom > startTo) {
-      const tmp = startFrom;
-      startFrom = startTo;
-      startTo = tmp;
-    }
-    return { startFrom, startTo };
-  }
-
-  function rangeActive() {
-    const cfg = page();
-    return !!(cfg.startFrom || cfg.startTo);
-  }
-
-  function formatRangeLabel(from, to) {
-    if (!from && !to) return '';
-    if (from && to && from === to) return formatStart(from);
-    if (from && to) return `${formatStart(from)} – ${formatStart(to)}`;
-    if (from) return `from ${formatStart(from)}`;
-    return `until ${formatStart(to)}`;
-  }
-
-  function startInRange(item) {
-    const { startFrom, startTo } = page();
-    if (!startFrom && !startTo) return true;
-    if (!item.startKey) return false;
-    if (startFrom && item.startKey < startFrom) return false;
-    if (startTo && item.startKey > startTo) return false;
-    return true;
-  }
-
-  function parseRangeInput(raw) {
-    const str = String(raw || '').trim();
-    const m = str.match(/^(.+?)\s+(?:to|–|—)\s+(.+)$/i);
-    if (!m) return null;
-    const from = parseStartInput(m[1]);
-    const to = parseStartInput(m[2]);
-    if (!from && !to) return null;
-    return normalizeRange(from, to);
-  }
-
   function employeeKind(title) {
     const m = String(title || '').match(/\((Internal|External)\s+employee\)/i);
     return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : '—';
@@ -308,125 +250,6 @@
         white-space: nowrap;
       }
       td[data-sth-col="start"] .sth-empty { opacity: .35; }
-      tr.${HIDE_MARK} { display: none !important; }
-      [${HIDE_ATTR}="1"] { display: none !important; }
-      #${RANGE_TABLE_ID} {
-        width: 100%;
-        border-collapse: separate;
-        background: inherit;
-        table-layout: auto;
-      }
-      #${RANGE_TABLE_ID} thead { display: table-header-group; }
-      #${RANGE_BANNER_ID} {
-        margin: 8px 0;
-        padding: 8px 12px;
-        border-radius: 8px;
-        font: 600 12px Inter, ui-sans-serif, system-ui, sans-serif;
-        color: ${c};
-        background: ${hexToRgba(c, 0.12)};
-        border: 1px solid ${hexToRgba(c, 0.35)};
-      }
-      th[data-sth-col="start"].sth-filtered { color: ${c}; }
-      th[data-sth-col="start"] .sth-range-badge {
-        display: block;
-        margin-top: 2px;
-        font-size: 10px;
-        font-weight: 650;
-        letter-spacing: .02em;
-        color: ${c};
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 140px;
-        cursor: pointer;
-      }
-      th[data-sth-col="start"]:not(.sth-filtered) .sth-range-badge {
-        color: inherit;
-        opacity: .55;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-      }
-      th[data-sth-col="start"]:not(.sth-filtered) .sth-range-badge:hover {
-        opacity: 1;
-        color: ${c};
-      }
-      th[data-sth-col="start"] .sth-range-clear {
-        margin-left: 4px;
-        border: 0;
-        padding: 0 3px;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-        font-size: 12px;
-        line-height: 1;
-        opacity: .7;
-      }
-      th[data-sth-col="start"] .sth-range-clear:hover { opacity: 1; }
-      #${RANGE_POP_ID} {
-        position: fixed;
-        z-index: 2147483646;
-        width: 268px;
-        padding: 12px;
-        border-radius: 14px;
-        color: #e8eaed;
-        background: linear-gradient(180deg, rgba(28,32,38,.96), rgba(18,20,24,.98));
-        border: 1px solid rgba(255,255,255,.10);
-        box-shadow: 0 18px 50px rgba(0,0,0,.35);
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-        box-sizing: border-box;
-      }
-      #${RANGE_POP_ID} * { box-sizing: border-box; }
-      #${RANGE_POP_ID} h4 { margin: 0 0 10px; font-size: 12.5px; font-weight: 650; }
-      #${RANGE_POP_ID} .sth-range-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      #${RANGE_POP_ID} label {
-        display: grid;
-        gap: 4px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: .06em;
-        text-transform: uppercase;
-        color: #8b949e;
-      }
-      #${RANGE_POP_ID} input[type="date"] {
-        height: 30px;
-        width: 100%;
-        border-radius: 8px;
-        border: 1px solid rgba(255,255,255,.10);
-        background: rgba(255,255,255,.05);
-        color: #f2f4f7;
-        padding: 0 8px;
-        font-size: 12px;
-        color-scheme: dark;
-        outline: none;
-      }
-      #${RANGE_POP_ID} .sth-range-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
-      #${RANGE_POP_ID} .sth-range-actions button {
-        height: 30px;
-        border-radius: 8px;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      #${RANGE_POP_ID} .sth-apply { border: 0; color: #fff; background: ${c}; }
-      #${RANGE_POP_ID} .sth-clear {
-        border: 1px solid rgba(255,255,255,.08);
-        background: transparent;
-        color: #c5cbd3;
-      }
-      #${RANGE_POP_ID} .sth-quick { display: grid; gap: 4px; margin-top: 8px; }
-      #${RANGE_POP_ID} .sth-quick button {
-        height: 26px;
-        border: 0;
-        border-radius: 7px;
-        background: rgba(255,255,255,.04);
-        color: #c5cbd3;
-        text-align: left;
-        padding: 0 8px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      #${RANGE_POP_ID} .sth-quick button:hover { background: rgba(255,255,255,.08); color: #fff; }
     `;
   }
 
@@ -440,42 +263,14 @@
     document.querySelectorAll('[data-sth-col="start"]').forEach((el) => el.remove());
   }
 
-  function journeyHeaderTable() {
-    const th = [...document.querySelectorAll('thead th[data-name="subject"], th[data-name="subject"]')]
-      .find((el) => !el.closest(`#${RANGE_TABLE_ID}`));
-    return th?.closest('table') || null;
-  }
-
-  function journeyBodyTable() {
-    for (const row of document.querySelectorAll('tr.et-tr')) {
-      if (row.closest(`#${RANGE_TABLE_ID}`) || row.closest('thead')) continue;
-      return row.closest('table');
-    }
-    return null;
-  }
-
-  function visibleJourneyTable() {
-    return document.getElementById(RANGE_TABLE_ID)
-      || journeyBodyTable()
-      || journeyHeaderTable()
-      || document;
-  }
-
   function injectStartColumn(items) {
     if (moduleId !== 'journeys') {
       removeStartColumn();
       return;
     }
-    const rowTable = items[0]?.row.closest('table') || document.getElementById(RANGE_TABLE_ID) || visibleJourneyTable();
-    if (rowTable && rowTable.id === RANGE_TABLE_ID && !rowTable.querySelector('thead th[data-name="subject"]')) {
-      const liveHead = journeyHeaderTable()?.querySelector('thead');
-      if (liveHead) rowTable.insertBefore(liveHead.cloneNode(true), rowTable.firstChild);
-    }
-    const table = rowTable || visibleJourneyTable();
-    const subjectTh = table.querySelector?.('thead th[data-name="subject"]')
-      || table.querySelector?.('th[data-name="subject"]');
+    const subjectTh = document.querySelector('thead th[data-name="subject"]');
     if (!subjectTh) return;
-    let th = table.querySelector?.('th[data-sth-col="start"]');
+    let th = document.querySelector('thead th[data-sth-col="start"]');
     if (!th) {
       th = document.createElement('th');
       th.dataset.sthCol = 'start';
@@ -485,22 +280,9 @@
     }
     const cfg = page();
     const on = cfg.sortKey === 'start';
-    const rangeOn = !!(cfg.startFrom || cfg.startTo);
-    const rangeText = formatRangeLabel(cfg.startFrom, cfg.startTo);
     th.classList.toggle('sth-on', on);
-    th.classList.toggle('sth-filtered', rangeOn);
-    th.innerHTML = `Start date<span class="sth-sort">${on ? (cfg.sortDir === 'desc' ? '↓' : '↑') : '↕'}</span><span class="sth-range-badge" title="${
-      rangeOn
-        ? `Showing ${escapeHtml(rangeText)}. Click to edit, × to clear.`
-        : 'Filter by from–to start dates'
-    }">${
-      rangeOn
-        ? `${escapeHtml(rangeText)}<button type="button" class="sth-range-clear" title="Clear start date range">×</button>`
-        : 'Filter'
-    }</span>`;
-    th.title = rangeOn
-      ? `Showing ${rangeText}. Click to sort · Filter or right-click to change the from–to range`
-      : 'Click to sort · Filter or right-click for from–to dates';
+    th.innerHTML = `Start date<span class="sth-sort">${on ? (cfg.sortDir === 'desc' ? '↓' : '↑') : '↕'}</span>`;
+    th.title = 'Sort by start date from the request title';
     items.forEach((item) => {
       const subjectTd = item.row.querySelector('td[data-name="subject"]');
       if (!subjectTd) return;
@@ -515,7 +297,7 @@
       else delete td.dataset.startKey;
       const label = prettyStart(item.start);
       td.innerHTML = label
-        ? `<span title="Start ${formatStart(item.startKey)} · Right-click to filter from–to">${label}</span>`
+        ? `<span title="Start ${formatStart(item.startKey)}">${label}</span>`
         : '<span class="sth-empty">—</span>';
     });
   }
@@ -571,15 +353,11 @@
     return row.closest('tbody');
   }
 
-  function collectRows(root) {
+  function collectRows() {
     const now = Date.now();
     const out = [];
-    const staticTbl = document.getElementById(RANGE_TABLE_ID);
-    const scope = root || staticTbl || document;
-    scope.querySelectorAll('tr.et-tr').forEach((row, idx) => {
+    document.querySelectorAll('tr.et-tr').forEach((row, idx) => {
       if (row.closest('thead')) return;
-      if (row.classList.contains(HIDE_MARK)) return;
-      if (staticTbl && scope !== staticTbl && !staticTbl.contains(scope) && row.closest(`#${RANGE_TABLE_ID}`)) return;
       if (!row.dataset.sthOrd) row.dataset.sthOrd = String(idx);
       const updatedEl = row.querySelector('td[data-name="updated_at_date"] [data-test-id="date-cell"]');
       const createdEl = row.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
@@ -650,137 +428,10 @@
     return match;
   }
 
-  let rangeViewKey = '';
-  let lastStats = { tickets: 0, marked: 0, hidden: 0 };
-
-  function rangeKey() {
-    return `${page().startFrom || ''}|${page().startTo || ''}`;
-  }
-
-  function sourceTable() {
-    return journeyBodyTable() || journeyHeaderTable();
-  }
-
-  function sanitizeClone(tr) {
-    tr.removeAttribute('id');
-    tr.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-    tr.classList.remove(HIDE_MARK, ROW_MARK);
-    tr.removeAttribute('data-stale-days');
-    return tr;
-  }
-
-  function fingerprint(root) {
-    const scope = root || journeyBodyTable();
-    if (!scope) return '';
-    return [...scope.querySelectorAll('tr.et-tr a[href]')]
-      .filter((a) => !a.closest(`#${RANGE_TABLE_ID}`))
-      .map((a) => a.getAttribute('href'))
-      .join('|');
-  }
-
-  function liveListKey() {
-    return `${location.pathname}${location.search}|${rangeKey()}|${fingerprint(journeyBodyTable())}`;
-  }
-
-  function setHiddenFlag(el, on) {
-    if (!el) return;
-    if (on) el.setAttribute(HIDE_ATTR, '1');
-    else {
-      el.removeAttribute(HIDE_ATTR);
-      el.removeAttribute(SRC_ATTR);
-    }
-  }
-
-  function hideSourceChrome(on) {
-    const targets = new Set();
-    [journeyHeaderTable(), journeyBodyTable()].forEach((el) => {
-      if (!el) return;
-      const wrap = el.closest('.ember-table-overflow, .et-table-scroll, .ember-table, .et-table') || el;
-      if (wrap && wrap !== document.body && wrap.id !== RANGE_TABLE_ID) targets.add(wrap);
-    });
-    targets.forEach((el) => {
-      if (el.closest?.(`#${RANGE_TABLE_ID}`)) return;
-      if (on) el.setAttribute(SRC_ATTR, '1');
-      setHiddenFlag(el, on);
-    });
-  }
-
-  function setRangeBanner(text) {
-    let el = document.getElementById(RANGE_BANNER_ID);
-    if (!text) {
-      el?.remove();
-      return;
-    }
-    const src = journeyHeaderTable() || journeyBodyTable() || sourceTable();
-    if (!el) {
-      el = document.createElement('div');
-      el.id = RANGE_BANNER_ID;
-      (src?.parentNode || document.body).insertBefore(el, src || null);
-    }
-    el.textContent = text;
-  }
-
-  function mountStaticRows(rowEls) {
-    const headerTable = journeyHeaderTable();
-    const bodyTable = journeyBodyTable();
-    const src = headerTable || bodyTable;
-    if (!src) return null;
-    const inRangeRows = rowEls.filter((row) => startInRange({ startKey: dateKey(parseStartDate(rowTitle(row))) }));
-    let table = document.getElementById(RANGE_TABLE_ID);
-    if (!table) {
-      table = (headerTable || src).cloneNode(false);
-      table.id = RANGE_TABLE_ID;
-      table.removeAttribute(HIDE_ATTR);
-      table.removeAttribute(SRC_ATTR);
-      const thead = headerTable?.querySelector('thead') || src.querySelector('thead');
-      if (thead) table.appendChild(thead.cloneNode(true));
-      table.appendChild(document.createElement('tbody'));
-      const before = headerTable || bodyTable || src;
-      before.parentNode.insertBefore(table, before);
-    }
-    if (!table.querySelector('thead th[data-name="subject"]')) {
-      const thead = headerTable?.querySelector('thead');
-      if (thead) table.insertBefore(thead.cloneNode(true), table.firstChild);
-    }
-    const tbody = table.tBodies[0] || table.appendChild(document.createElement('tbody'));
-    tbody.replaceChildren();
-    inRangeRows.forEach((row, i) => {
-      const tr = row.cloneNode(true);
-      sanitizeClone(tr);
-      tr.dataset.sthOrd = String(i);
-      tbody.appendChild(tr);
-    });
-    hideSourceChrome(true);
-    const range = formatRangeLabel(page().startFrom, page().startTo);
-    const extra = inRangeRows.length === 1 ? '' : 's';
-    setRangeBanner(inRangeRows.length
-      ? `Showing ${inRangeRows.length} request${extra} with start date ${range} in this Freshservice view.`
-      : `No requests with start date ${range} in this Freshservice view.`);
-    return table;
-  }
-
-  function teardownRangeView() {
-    const hadView = !!(document.getElementById(RANGE_TABLE_ID) || rangeViewKey);
-    rangeViewKey = '';
-    document.getElementById(RANGE_TABLE_ID)?.remove();
-    setRangeBanner('');
-    hideSourceChrome(false);
-    document.querySelectorAll(`[${HIDE_ATTR}="1"]`).forEach((el) => {
-      el.removeAttribute(HIDE_ATTR);
-      el.removeAttribute(SRC_ATTR);
-    });
-    document.querySelectorAll(`tr.${HIDE_MARK}`).forEach((el) => el.classList.remove(HIDE_MARK));
-    document.querySelectorAll('[data-sth-count-orig]').forEach((el) => {
-      el.textContent = el.dataset.sthCountOrig;
-      delete el.dataset.sthCountOrig;
-    });
-    return hadView;
-  }
+  let lastStats = { tickets: 0, marked: 0 };
 
   function listedRows() {
-    const items = collectRows();
-    if (moduleId !== 'journeys' || !rangeActive()) return items;
-    return items.filter(startInRange);
+    return collectRows();
   }
 
   function clearMarks() {
@@ -802,7 +453,7 @@
         if (item.cell) item.cell.classList.add(CELL_MARK);
       });
     }
-    lastStats = { tickets: items.length, marked: hits.length, hidden: 0 };
+    lastStats = { tickets: items.length, marked: hits.length };
     injectStartColumn(items);
     sortTableRows(items);
     renderStats();
@@ -810,22 +461,6 @@
 
   function markTickets() {
     moduleId = detectModule();
-    if (moduleId !== 'journeys' || !rangeActive()) {
-      teardownRangeView();
-      paintList();
-      return;
-    }
-    const key = liveListKey();
-    const staticTable = document.getElementById(RANGE_TABLE_ID);
-    if (staticTable && rangeViewKey === key) {
-      paintList();
-      return;
-    }
-    const src = journeyBodyTable();
-    const sourceItems = src ? collectRows(src) : [];
-    rangeViewKey = key;
-    const kept = sourceItems.filter(startInRange);
-    mountStaticRows(kept.map((item) => sanitizeClone(item.row.cloneNode(true))));
     paintList();
   }
 
@@ -846,7 +481,6 @@
     items.forEach((item) => {
       const body = rowTbody(item.row);
       if (!body) return;
-      if (!body.closest(`#${RANGE_TABLE_ID}`)) return;
       if (!groups.has(body)) groups.set(body, []);
       groups.get(body).push(item);
     });
@@ -1019,10 +653,6 @@
       .tag { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: #fff; font-size: 11px; font-weight: 650; }
       .tag button { width: 14px; height: 14px; border: 0; padding: 0; background: transparent; color: #fff; cursor: pointer; }
       .tagbox input { width: 100%; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.05); color: #f2f4f7; padding: 0 10px; font-size: 12px; outline: none; }
-      .tagbox input[type="date"] { color-scheme: dark; padding: 0 8px; }
-      .range-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-      .range-field { display: grid; gap: 4px; }
-      .range-field span { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; }
       .swatch { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
       .swatch.on { border-color: #fff; }
       .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -1126,13 +756,7 @@
             <span style="display:flex;align-items:center;gap:6px"><span class="tag-count" id="startCount">0</span><span class="chev">▸</span></span>
           </button>
           <div class="tagbox-body">
-            <p class="hint">From / to shows this Freshservice view’s rows whose start date is in range. Native filters and pagination stay in charge; clear the range to see the full view. Same control: Filter on the column, or right-click a start date.</p>
-            <div class="range-row">
-              <label class="range-field"><span>From</span><input id="startFrom" type="date" /></label>
-              <label class="range-field"><span>To</span><input id="startTo" type="date" /></label>
-            </div>
-            <button class="ghost" id="clearStartRange" type="button" style="height:28px">Clear range</button>
-            <p class="hint">Highlight specific dates from the title (Start DD-MM-YYYY):</p>
+            <p class="hint">From the title: Start DD-MM-YYYY.</p>
             <div class="tags" id="startTags"></div>
             <input id="startInput" type="text" placeholder="14-09-2026 · Enter" autocomplete="off" spellcheck="false" />
             <div class="chips" id="startHints"></div>
@@ -1202,8 +826,7 @@
     const r = buildReport();
     const hist = loadHistory().filter((h) => h.module === r.module);
     $('reportTitle').textContent = r.module === 'journeys' ? 'Journey statistics' : 'Ticket statistics';
-    const rangeBit = r.module === 'journeys' && rangeActive() ? ` · start ${formatRangeLabel(page().startFrom, page().startTo)}` : '';
-    $('reportSub').textContent = `${r.n} rows${rangeBit} · ${hist.length} snapshots · names not stored`;
+    $('reportSub').textContent = `${r.n} rows · ${hist.length} snapshots · names not stored`;
     const extra = r.module === 'journeys' ? `
       <div class="kpi">
         <div class="stat"><b>${r.awaiting}</b><span>Awaiting info</span></div>
@@ -1253,8 +876,7 @@
     $('fabCount').textContent = String(lastStats.marked);
     const name = moduleId === 'journeys' ? 'Journeys' : 'Tickets';
     const prefix = settings.module === 'auto' ? `Auto · ${name}` : name;
-    const hiddenBit = lastStats.hidden ? ` · ${lastStats.hidden} hidden` : '';
-    $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}${hiddenBit}`;
+    $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}`;
     $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked` : 'Open marked tabs';
   }
   function discoveredStatuses() {
@@ -1320,8 +942,6 @@
       maxProgress: p.maxProgress ?? null,
       startWithin: p.startWithin ?? null,
       startDates: [...(p.startDates || [])],
-      startFrom: validDateKey(p.startFrom),
-      startTo: validDateKey(p.startTo),
       activePreset: p.id,
     });
   }
@@ -1421,13 +1041,8 @@
       : `Mark if age, status, or start date matches.`;
     $('statusLabel').textContent = cfg.matchMode === 'and' ? 'Limit to status' : 'Also mark status';
     $('statusCount').textContent = String(cfg.statuses.length);
-    $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Start date';
-    const rangeText = formatRangeLabel(cfg.startFrom, cfg.startTo);
-    const startN = (cfg.startDates || []).length;
-    $('startCount').textContent = rangeText ? (startN ? `${rangeText} · ${startN}` : rangeText) : String(startN);
-    $('startFrom').value = cfg.startFrom || '';
-    $('startTo').value = cfg.startTo || '';
-    $('clearStartRange').style.display = (cfg.startFrom || cfg.startTo) ? '' : 'none';
+    $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
+    $('startCount').textContent = String((cfg.startDates || []).length);
     $('startBox').style.display = moduleId === 'journeys' ? '' : 'none';
     const open = settings.uiOpen || {};
     shadow.querySelectorAll('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec]));
@@ -1501,33 +1116,18 @@
   });
   const statusInput = $('statusInput');
   const startInput = $('startInput');
-  const startFromInput = $('startFrom');
-  const startToInput = $('startTo');
   ['keydown', 'keypress', 'keyup'].forEach((type) => {
     statusInput.addEventListener(type, (e) => e.stopPropagation());
     startInput.addEventListener(type, (e) => e.stopPropagation());
-    startFromInput.addEventListener(type, (e) => e.stopPropagation());
-    startToInput.addEventListener(type, (e) => e.stopPropagation());
   });
   startInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       const raw = startInput.value;
       startInput.value = '';
-      const range = parseRangeInput(raw);
-      if (range && (range.startFrom || range.startTo)) {
-        setStartRange(range.startFrom, range.startTo);
-        return;
-      }
       addStartDate(raw);
     }
   });
-  function readPanelRange() {
-    setStartRange(startFromInput.value, startToInput.value);
-  }
-  startFromInput.addEventListener('change', readPanelRange);
-  startToInput.addEventListener('change', readPanelRange);
-  $('clearStartRange').addEventListener('click', () => clearStartRange());
   statusInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
@@ -1554,9 +1154,7 @@
       matchMode: page().matchMode,
       maxProgress: page().maxProgress,
       startWithin: page().startWithin,
-      startDates: [...(page().startDates || [])],
-      startFrom: page().startFrom || null,
-      startTo: page().startTo || null
+      startDates: [...(page().startDates || [])]
     };
     updatePage({ presets: [...page().presets, preset], activePreset: preset.id });
   });
@@ -1584,159 +1182,18 @@
     localStorage.removeItem(HISTORY_KEY);
     renderReport();
   });
-  $('rescan').addEventListener('click', () => {
-    rangeViewKey = '';
-    document.getElementById(RANGE_TABLE_ID)?.remove();
-    markTickets();
-  });
-
-  function setStartRange(from, to, opts = {}) {
-    const range = normalizeRange(from, to);
-    if (opts.open) settings.uiOpen = { ...(settings.uiOpen || {}), start: true };
-    updatePage({ ...range, activePreset: null });
-  }
-  function clearStartRange() {
-    updatePage({ startFrom: null, startTo: null, activePreset: null });
-  }
-
-  let rangePopCloser = null;
-  let rangePopEsc = null;
-  function hideRangePop() {
-    document.getElementById(RANGE_POP_ID)?.remove();
-    if (rangePopCloser) {
-      document.removeEventListener('mousedown', rangePopCloser, true);
-      rangePopCloser = null;
-    }
-    if (rangePopEsc) {
-      document.removeEventListener('keydown', rangePopEsc, true);
-      rangePopEsc = null;
-    }
-  }
-  function placeRangePop(pop, clientX, clientY) {
-    const r = pop.getBoundingClientRect();
-    const pad = 8;
-    let x = clientX;
-    let y = clientY;
-    if (x + r.width > window.innerWidth - pad) x = Math.max(pad, window.innerWidth - r.width - pad);
-    if (y + r.height > window.innerHeight - pad) y = Math.max(pad, window.innerHeight - r.height - pad);
-    if (x < pad) x = pad;
-    if (y < pad) y = pad;
-    pop.style.left = `${x}px`;
-    pop.style.top = `${y}px`;
-  }
-  function showRangePop(clientX, clientY, seedKey) {
-    hideRangePop();
-    moduleId = detectModule();
-    if (moduleId !== 'journeys') return;
-    const cfg = page();
-    const pop = document.createElement('div');
-    pop.id = RANGE_POP_ID;
-    const seedLabel = seedKey ? formatStart(seedKey) : '';
-    const quick = seedKey ? `
-      <div class="sth-quick">
-        <button type="button" data-quick="from">From ${escapeHtml(seedLabel)}</button>
-        <button type="button" data-quick="to">Until ${escapeHtml(seedLabel)}</button>
-        <button type="button" data-quick="only">Only ${escapeHtml(seedLabel)}</button>
-      </div>` : '';
-    pop.innerHTML = `
-      <h4>Filter start dates</h4>
-      <div class="sth-range-grid">
-        <label>From<input type="date" data-from value="${cfg.startFrom || ''}"></label>
-        <label>To<input type="date" data-to value="${cfg.startTo || ''}"></label>
-      </div>
-      <div class="sth-range-actions">
-        <button type="button" class="sth-apply">Show range</button>
-        <button type="button" class="sth-clear">Clear</button>
-      </div>
-      ${quick}`;
-    document.body.appendChild(pop);
-    placeRangePop(pop, clientX, clientY);
-    const apply = () => {
-      setStartRange(pop.querySelector('[data-from]')?.value, pop.querySelector('[data-to]')?.value, { open: true });
-      hideRangePop();
-    };
-    pop.querySelector('.sth-apply').addEventListener('click', apply);
-    pop.querySelector('.sth-clear').addEventListener('click', () => {
-      clearStartRange();
-      hideRangePop();
-    });
-    pop.querySelectorAll('[data-quick]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const kind = btn.dataset.quick;
-        if (kind === 'from') setStartRange(seedKey, page().startTo, { open: true });
-        else if (kind === 'to') setStartRange(page().startFrom, seedKey, { open: true });
-        else setStartRange(seedKey, seedKey, { open: true });
-        hideRangePop();
-      });
-    });
-    pop.querySelectorAll('input[type="date"]').forEach((input) => {
-      input.addEventListener('keydown', (e) => {
-        e.stopPropagation();
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          apply();
-        }
-      });
-    });
-    ['mousedown', 'click', 'pointerdown'].forEach((type) => {
-      pop.addEventListener(type, (e) => e.stopPropagation());
-    });
-    pop.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    rangePopEsc = (e) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      hideRangePop();
-    };
-    document.addEventListener('keydown', rangePopEsc, true);
-    setTimeout(() => {
-      rangePopCloser = (ev) => {
-        const live = document.getElementById(RANGE_POP_ID);
-        if (!live) return;
-        if (live.contains(ev.target)) return;
-        if (live.querySelector('input[type="date"]:focus')) return;
-        hideRangePop();
-      };
-      document.addEventListener('mousedown', rangePopCloser, true);
-    }, 0);
-  }
+  $('rescan').addEventListener('click', markTickets);
 
   document.addEventListener('click', (e) => {
     const th = e.target.closest?.('th[data-sth-col="start"]');
     if (!th) return;
     e.preventDefault();
     e.stopPropagation();
-    if (e.target.closest('.sth-range-clear')) {
-      clearStartRange();
-      return;
-    }
-    if (e.target.closest('.sth-range-badge')) {
-      const r = e.target.closest('.sth-range-badge').getBoundingClientRect();
-      showRangePop(r.left, r.bottom + 4, null);
-      return;
-    }
     const nextDir = page().sortKey === 'start' && page().sortDir === 'asc' ? 'desc' : 'asc';
     updatePage({ sortKey: 'start', sortDir: nextDir });
   }, true);
 
-  document.addEventListener('contextmenu', (e) => {
-    const cell = e.target.closest?.('[data-sth-col="start"]');
-    if (!cell) return;
-    moduleId = detectModule();
-    if (moduleId !== 'journeys') return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    const seed = cell.matches('td') || cell.closest('td[data-sth-col="start"]')
-      ? (cell.dataset.startKey || cell.closest('td[data-sth-col="start"]')?.dataset.startKey || null)
-      : null;
-    showRangePop(e.clientX, e.clientY, seed);
-  }, true);
-
   window.addEventListener('resize', () => {
-    hideRangePop();
     if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
       const p = placeAt(settings.x, settings.y);
       settings.x = p.x; settings.y = p.y; saveSettings(settings);
@@ -1749,7 +1206,7 @@
 
   let timer;
   window.__staleTicketObserver = new MutationObserver((muts) => {
-    if (muts.every((m) => host.contains(m.target) || m.target.closest?.(`#${HOST_ID}, #${RANGE_POP_ID}, #${RANGE_TABLE_ID}, #${RANGE_BANNER_ID}`))) return;
+    if (muts.every((m) => host.contains(m.target) || m.target.closest?.(`#${HOST_ID}`))) return;
     clearTimeout(timer);
     timer = setTimeout(markTickets, 300);
   });
