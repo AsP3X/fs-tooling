@@ -3,8 +3,9 @@
 Ops panel for Freshservice ticket lists and Employee Onboarding / Journeys.
 
 - Tickets: idle highlighting from **Updated**, status tags, AND/OR, saved views
-- Journeys: age from status “since N days” (else created), child-ticket progress, start-date tags from the title (`Start 14-09-2026`), Internal/External counts
-- Sort the visible list by Start date, Created On, Initiator, Request Status, or child progress
+- Journeys: injected **Start date** column parsed from the title (`Start 14-09-2026`), click the header to sort
+- Also sort the visible list by Created On, Initiator, Request Status, or child progress
+- Age from status “since N days” (else created), child-ticket progress, Internal/External counts
 - Statistics snapshots do **not** store person names
 
 ## Downloads
@@ -24,4 +25,4 @@ Every push to `master` that includes `script/freshservice-mod-dialog.js` (or `sc
 4. **Load unpacked** and select the unpacked folder (`manifest.json` at the top).
 5. Open `/a/tickets` or a Journeys list.
 
-Current source version: **2.0.2**.
+Current source version: **2.1.0**.

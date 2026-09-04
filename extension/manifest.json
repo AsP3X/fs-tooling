@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Freshservice Ops Panel",
-  "version": "2.0.2",
-  "description": "Highlight, filter, and sort Freshservice tickets and onboarding journeys.",
+  "version": "2.1.0",
+  "description": "Highlight, filter, and sort Freshservice tickets and onboarding journeys. Adds a Start date column on Journeys.",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
