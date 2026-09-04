@@ -25,7 +25,7 @@ Output:
 
 | Path | Purpose |
 |------|---------|
-| `dist/sth-extension/` | Load unpacked in Chrome / Edge |
+| `dist/sth-extension/` | Load unpacked in Chrome / Edge (`content.js` + `background.js`) |
 | `dist/sth-extension.zip` | Release artifact |
 | `dist/sth-extension.tar.gz` | Same folder as a tarball |
 | `dist/freshservice-mod-dialog.js` | Tampermonkey / injectable script |

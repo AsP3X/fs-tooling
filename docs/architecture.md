@@ -2,14 +2,17 @@
 
 ← [Back to main README](../README.md) · [Documentation index](./README.md)
 
-The product is a single **Manifest V3 content script** (no background worker, no popup). Chrome and Edge load the same package.
+The product is a Manifest V3 **content script** plus a small **service worker** (API key storage). Chrome and Edge load the same package.
 
 ```
 src/
   content.ts            Content-script entry (host, observer)
+  background.ts         Service worker — API key in chrome.storage.local
   lib/                  Pure or DOM-scrape helpers (unit-tested)
+    context.ts          list / detail / other + module
     dates.ts            Ticket cell dates + journey Start-from-title
     match.ts            AND/OR idle / status / start / progress
+    secrets.ts          Message the worker (or sessionStorage in userscripts)
     settings.ts         localStorage merge + normalize
     rows.ts             tr.et-tr → RowItem
     sort.ts             Visible-page comparator
@@ -17,6 +20,7 @@ src/
     detect.ts           tickets vs journeys
   page/                 Host-page mutations (highlight, start column)
   panel/                Shadow-DOM UI (html/css + event wiring)
+    features.ts         Context-gated cards + registerPanelFeature()
 extension/
   manifest.json         MV3 shell (version stamped at build)
 ```
@@ -31,12 +35,23 @@ Vite bundles `src/content.ts` as an IIFE to `dist/sth-extension/content.js`. A p
 
 ## Persistence
 
-| Key | Contents |
-|-----|----------|
-| `sth-settings-v2` | Module, panel position, per-page filters/views |
-| `sth-history-v2` | Rolling statistics snapshots (counts/averages only) |
+| Key | Where | Contents |
+|-----|--------|----------|
+| `sth-settings-v2` | Page `localStorage` | Module, panel position, per-page filters/views |
+| `sth-history-v2` | Page `localStorage` | Rolling statistics snapshots (counts/averages only) |
+| `sth.apiKey` | Extension `chrome.storage.local` (service worker) | Freshservice API key. Never written to page storage. |
 
-Keys live on the **host page** origin so a Tampermonkey install and the extension share settings. Changing key names is a breaking change for users.
+Panel settings keys live on the **host page** origin so a Tampermonkey install and the extension share views. The API key does not: the extension keeps it in the worker; the userscript build falls back to `sessionStorage`.
+
+## Context-based features
+
+`detectContext` returns `{ module, surface }` (`list` | `detail` | `other`). Built-in cards in `panel.html` set `data-feature="…"` and `applyFeatureVisibility` hides anything that does not match the current page.
+
+To add a new context-specific card without restyling the panel:
+
+1. Implement a `PanelFeature` (`id`, `modules`, `surfaces`, `mount`, optional `sync`).
+2. Call `registerPanelFeature` from a module imported by `src/content.ts`.
+3. Reuse existing classes (`card`, `tagbox`, `chip`, `hint`, …). The plugin host is `#featureMount`.
 
 ## Matching
 

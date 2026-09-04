@@ -3,7 +3,9 @@
 
 import { HOST_ID, STYLE_ID } from './lib/constants';
 import { markTickets } from './page/paint';
+import { runtime } from './page/runtime';
 import { initPanel } from './panel/ui';
+// New context-specific cards: registerPanelFeature() from ./panel/features and import that module here.
 
 document.getElementById(HOST_ID)?.remove();
 document.getElementById(STYLE_ID)?.remove();
@@ -28,6 +30,9 @@ window.__staleTicketObserver = new MutationObserver((muts) => {
     return;
   }
   clearTimeout(timer);
-  timer = setTimeout(markTickets, 300);
+  timer = setTimeout(() => {
+    markTickets();
+    runtime.onPageChange();
+  }, 300);
 });
 window.__staleTicketObserver.observe(document.body, { childList: true, subtree: true });

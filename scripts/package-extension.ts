@@ -63,6 +63,8 @@ export function packageExtension(): void {
     throw new Error(`Vite did not emit ${contentPath}`);
   }
   mkdirSync(unpacked, { recursive: true });
+  const backgroundSrc = readFileSync(join(root, 'src/background.ts'), 'utf8');
+  writeFileSync(join(unpacked, 'background.js'), backgroundSrc);
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
   const manifest = JSON.parse(readFileSync(join(root, 'extension/manifest.json'), 'utf8')) as { version: string };
   manifest.version = pkg.version;

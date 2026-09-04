@@ -27,5 +27,6 @@ jobs:
         run: |
           test -f dist/sth-extension/manifest.json
           test -f dist/sth-extension/content.js
+          test -f dist/sth-extension/background.js
           test -f dist/sth-extension.zip
           test -f dist/freshservice-mod-dialog.js

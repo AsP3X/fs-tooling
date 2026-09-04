@@ -80,10 +80,10 @@ Do **not**:
 
 Do:
 
-- Collect the key on an extension options page.
-- Keep it in `chrome.storage.session` (in-memory; cleared on disable/reload/update/browser restart) with access limited to trusted extension contexts, or encrypt at rest if we persist longer.
-- Have the content script **message the service worker**; the worker `fetch`es `/api/v2` with `Authorization`.
-- Declare `"storage"` and `host_permissions` for `https://*.freshservice.com/*`.
+- Collect the key in the panel **Settings** view (gear in the header).
+- Persist it via the service worker in `chrome.storage.local` (`sth.apiKey`). The content script only messages the worker; it does not write the key to page `localStorage`.
+- Have future `/api/v2` calls run in the **service worker** with `Authorization`, not in the content script.
+- `"storage"` and `host_permissions` for `https://*.freshservice.com/*` are declared in the manifest.
 
 Same-origin `fetch` from the content script *can* send a Basic Auth header, but that puts the key in the page’s JS world. Prefer the worker. Runtime of cookie-only same-origin `/api/v2` was not tested and is not documented.
 

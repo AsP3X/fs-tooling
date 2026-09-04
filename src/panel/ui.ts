@@ -1,11 +1,13 @@
 // Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, drag position.
 // Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on filter changes. Isolated from the host page CSS.
 
+import { contextLabel, detectContext } from '../lib/context';
 import { HISTORY_KEY, JOURNEY_PRESETS, TICKET_PRESETS } from '../lib/constants';
 import { formatStart, parseStartInput } from '../lib/dates';
 import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
 import { collectRows } from '../lib/rows';
+import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
 import { assignRoot, getLastStats, getModuleId, getSettings, page, patchPage, patchRoot, setModuleId } from '../lib/state';
 import { buildReport } from '../lib/stats';
 import { escapeHtml, fmtDur } from '../lib/text';
@@ -13,6 +15,7 @@ import type { MatchMode, ModuleSetting, PageSettings, Preset, SortDir, SortKey }
 import { markTickets, openMarked } from '../page/paint';
 import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
+import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
 
@@ -27,7 +30,9 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const panel = $('panel');
   const fab = $('fab');
   const report = $('report');
+  const settingsPanel = $('settingsPanel');
   let reportOpen = false;
+  let settingsOpen = false;
   const didDrag = { current: false };
 
   function builtinPresets(): Preset[] {
@@ -113,12 +118,22 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   function renderStats(): void {
     const lastStats = getLastStats();
     $('fabCount').textContent = String(lastStats.marked);
-    const name = getModuleId() === 'journeys' ? 'Journeys' : 'Tickets';
-    const prefix = getSettings().module === 'auto' ? `Auto · ${name}` : name;
-    $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}`;
+    const ctx = detectContext(getSettings().module);
+    const labels = contextLabel(ctx);
+    if (ctx.surface === 'list') {
+      const prefix = getSettings().module === 'auto' ? `Auto · ${labels.title}` : labels.title;
+      $('panelSub').textContent = `${prefix} · ${lastStats.marked}/${lastStats.tickets}`;
+    }
     $('openStale').textContent = lastStats.marked ? `Open ${lastStats.marked} marked` : 'Open marked tabs';
   }
   runtime.renderStats = renderStats;
+  runtime.onPageChange = () => { syncUI(); };
+
+  async function refreshApiKeyStatus(): Promise<void> {
+    const key = await getApiKey();
+    $('apiKeyStatus').textContent = key ? `Saved · ${maskApiKey(key)}` : 'No key saved';
+    $('settingsSub').textContent = key ? 'API key saved' : 'API access';
+  }
 
   function discoveredStatuses(): string[] {
     return [...new Set(collectRows().map((r) => r.status).filter((s) => s && s !== '—'))].sort((a, b) => a.localeCompare(b));
@@ -203,12 +218,10 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   function renderExtraFilters(): void {
     const box = $('extraFilters');
-    if (getModuleId() !== 'journeys') {
-      box.style.display = 'none';
+    if (getModuleId() !== 'journeys' || detectContext(getSettings().module).surface !== 'list') {
       box.innerHTML = '';
       return;
     }
-    box.style.display = 'grid';
     const cfg = page();
     box.innerHTML = `
       <button type="button" class="tagbox-head" data-toggle="extra">
@@ -296,15 +309,21 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   function syncUI(): void {
     setModuleId(detectModule(getSettings().module));
+    const ctx = detectContext(getSettings().module);
     const cfg = page();
     const settings = getSettings();
-    const name = getModuleId() === 'journeys' ? 'Journeys' : 'Tickets';
+    const labels = contextLabel(ctx);
     shadow.querySelectorAll<HTMLElement>('.panel, .fab, .logo, .toggle, input[type="range"], .primary').forEach((el) => {
       el.style.setProperty('--accent', cfg.color);
     });
-    $('panelTitle').textContent = name;
-    $('panelSub').textContent = settings.module === 'auto' ? `Auto · ${name}` : name;
-    $('fabLabel').textContent = name;
+    $('panelTitle').textContent = labels.title;
+    $('fabLabel').textContent = labels.title;
+    if (ctx.surface !== 'list') {
+      $('panelSub').textContent = labels.sub;
+      $('contextHintText').textContent = ctx.surface === 'detail'
+        ? 'List filters apply on ticket and journey tables. Use Settings for the API key.'
+        : 'Open a ticket or journeys list to use filters.';
+    }
     $('daysCaption').textContent = getModuleId() === 'journeys' ? 'Age' : 'Idle age';
     $('enabled').classList.toggle('on', cfg.enabled);
     const days = $('days') as HTMLInputElement;
@@ -329,21 +348,24 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     $('statusCount').textContent = String(cfg.statuses.length);
     $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
     $('startCount').textContent = String((cfg.startDates || []).length);
-    $('startBox').style.display = getModuleId() === 'journeys' ? '' : 'none';
     const open = settings.uiOpen || {};
     shadow.querySelectorAll<HTMLElement>('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec || '']));
     $('deleteView').style.visibility = (cfg.presets || []).some((p) => p.id === cfg.activePreset) ? 'visible' : 'hidden';
     shadow.querySelectorAll<HTMLElement>('.swatch').forEach((sw) => {
       sw.classList.toggle('on', (sw.dataset.color || '').toLowerCase() === cfg.color.toLowerCase());
     });
-    panel.classList.toggle('hide', settings.collapsed || reportOpen);
-    fab.classList.toggle('show', settings.collapsed && !reportOpen);
+    const overlay = reportOpen || settingsOpen;
+    panel.classList.toggle('hide', settings.collapsed || overlay);
+    fab.classList.toggle('show', settings.collapsed && !overlay);
     report.classList.toggle('show', reportOpen && !settings.collapsed);
+    settingsPanel.classList.toggle('hide', !settingsOpen || settings.collapsed);
     renderViewPresets();
     renderStatusTags();
     renderStartTags();
     renderExtraFilters();
     renderSortKeys();
+    applyFeatureVisibility(shadow, ctx);
+    syncRegisteredFeatures($('featureMount'), ctx);
     applyPageStyles();
     applySavedPosition();
     renderStats();
@@ -396,6 +418,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   }
   makeDraggable($('dragHandle'));
   makeDraggable($('reportHandle'));
+  makeDraggable($('settingsHandle'));
   makeDraggable(fab);
 
   shadow.addEventListener('click', (e) => {
@@ -412,9 +435,11 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   const statusInput = $('statusInput') as HTMLInputElement;
   const startInput = $('startInput') as HTMLInputElement;
+  const apiKeyInput = $('apiKeyInput') as HTMLInputElement;
   (['keydown', 'keypress', 'keyup'] as const).forEach((type) => {
     statusInput.addEventListener(type, (e) => e.stopPropagation());
     startInput.addEventListener(type, (e) => e.stopPropagation());
+    apiKeyInput.addEventListener(type, (e) => e.stopPropagation());
   });
   startInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
@@ -484,6 +509,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   $('openStale').addEventListener('click', openMarked);
   $('openStats').addEventListener('click', () => {
     reportOpen = true;
+    settingsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
     renderReport();
@@ -492,6 +518,36 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     e.stopPropagation();
     reportOpen = false;
     syncUI();
+  });
+  $('openSettings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    settingsOpen = true;
+    reportOpen = false;
+    if (getSettings().collapsed) updateRoot({ collapsed: false });
+    else syncUI();
+    void refreshApiKeyStatus();
+  });
+  $('closeSettings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    settingsOpen = false;
+    syncUI();
+  });
+  $('saveApiKey').addEventListener('click', () => {
+    const value = apiKeyInput.value;
+    apiKeyInput.value = '';
+    void setApiKey(value).then(refreshApiKeyStatus);
+  });
+  apiKeyInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const value = apiKeyInput.value;
+    apiKeyInput.value = '';
+    void setApiKey(value).then(refreshApiKeyStatus);
+  });
+  $('clearApiKey').addEventListener('click', () => {
+    if (!confirm('Remove the saved API key from this browser?')) return;
+    apiKeyInput.value = '';
+    void clearApiKey().then(refreshApiKeyStatus);
   });
   $('saveSnap').addEventListener('click', () => {
     saveSnapshot(buildReport(collectRows(), getModuleId()));

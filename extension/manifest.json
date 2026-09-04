@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Freshservice Ops Panel",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Compact ops panel for Freshservice tickets and onboarding journeys.",
   "icons": {
     "16": "icon16.png",
@@ -16,6 +16,14 @@
       "32": "icon32.png",
       "48": "icon48.png"
     }
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.freshservice.com/*",
+    "https://*.myfreshworks.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {

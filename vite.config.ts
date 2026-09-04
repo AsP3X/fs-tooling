@@ -10,7 +10,6 @@ export default defineConfig({
   build: {
     outDir: 'dist/sth-extension',
     emptyOutDir: true,
-    cssCodeSplit: false,
     rollupOptions: {
       input: resolve(root, 'src/content.ts'),
       output: {

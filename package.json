@@ -1,7 +1,7 @@
 {
   "name": "freshservice-ops-panel",
   "private": true,
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Chrome / Edge Manifest V3 content script: ops panel for Freshservice tickets and onboarding journeys.",
   "type": "module",
   "engines": {
