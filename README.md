@@ -1,6 +1,10 @@
 # Freshservice tooling
 
-Highlight stale tickets, filter by status (AND/OR), save views, open marked tickets in tabs, and view idle/cycle statistics on Freshservice ticket lists.
+Ops panel for Freshservice ticket lists and Employee Onboarding / Journeys.
+
+- Tickets: idle highlighting from **Updated**, status tags, AND/OR, saved views
+- Journeys: age from status “since N days” (else created), child-ticket progress, start-date window, Internal/External counts
+- Statistics snapshots do **not** store person names
 
 ## Downloads
 
@@ -17,11 +21,6 @@ Every push to `master` that includes `script/freshservice-mod-dialog.js` publish
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable **Developer mode**.
 4. **Load unpacked** and select the unpacked folder (`manifest.json` at the top).
-5. Open `/a/tickets`.
+5. Open `/a/tickets` or a Journeys list.
 
-## Views and match mode (1.6.0)
-
-- **All** — mark only if idle **and** (optional) status is listed
-- **Any** — mark if idle **or** status is listed
-- Built-in views: Idle 6d, Open + idle, Pending 3d, 3rd party
-- **Save view** stores the current days + statuses + match mode
+Current source version: **2.0.0**.

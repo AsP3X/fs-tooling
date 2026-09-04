@@ -11,8 +11,12 @@ from pathlib import Path
 import sys, base64
 root = Path(sys.argv[1])
 plain = root / "script/freshservice-mod-dialog.js"
+parts = sorted((root / "script/parts").glob("*.js")) if (root / "script/parts").exists() else []
 payload = sorted((root / "script/payload").glob("*.b64")) if (root / "script/payload").exists() else []
-if payload:
+if parts:
+    src = "".join(p.read_text() for p in parts).encode()
+    plain.write_bytes(src)
+elif payload:
     blob = "".join(p.read_text() for p in payload)
     blob = "".join(blob.split())
     src = base64.urlsafe_b64decode(blob)
@@ -20,7 +24,7 @@ if payload:
 elif plain.exists() and plain.stat().st_size > 1000:
     src = plain.read_bytes()
 else:
-    raise SystemExit("missing script/payload/*.b64 or script/freshservice-mod-dialog.js")
+    raise SystemExit("missing script/parts, script/payload, or script/freshservice-mod-dialog.js")
 text = src.decode()
 if "// ==/UserScript==" in text:
     body = text.split("// ==/UserScript==", 1)[-1].lstrip("\n")
@@ -38,7 +42,7 @@ from pathlib import Path
 import struct, zlib, sys
 root = Path(sys.argv[1])
 
-def png(size, rgb=(230, 81, 0)):
+def png(size, rgb=(21, 101, 192)):
     r, g, b = rgb
     raw = b"".join(b"\x00" + bytes([r, g, b]) * size for _ in range(size))
     def chunk(tag, data):
