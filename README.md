@@ -17,4 +17,4 @@ Every push to `master` that includes `script/freshservice-mod-dialog.js` publish
 - `sth-extension.tar.gz` — same folder as a tarball
 - `freshservice-mod-dialog.js` — bare injectable / Tampermonkey script
 
-Current source version: **2.3.1**.
+Current source version: **2.3.2**.

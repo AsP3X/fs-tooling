@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Freshservice Ops Panel
 // @namespace    sth
-// @version      2.3.1
+// @version      2.3.2
 // @description  Tickets + Journeys filters, highlighting, and statistics
 // @match        https://*.freshservice.com/*
 // @match        https://*.myfreshworks.com/*
@@ -164,21 +164,38 @@
     return m ? `${m[3]}-${m[2]}-${m[1]}` : key;
   }
 
+  function civilDate(year, month1to12, day) {
+    const y = Number(year);
+    const m = Number(month1to12);
+    const d = Number(day);
+    if (!y || m < 1 || m > 12 || d < 1) return null;
+    const last = new Date(y, m, 0).getDate();
+    const dt = new Date(y, m - 1, Math.min(d, last));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
   function parseStartDate(title) {
-    const m = String(title || '').match(/Start\s+(\d{1,2})[./-](\d{1,2})[./-](\d{4})/i);
+    const s = String(title || '');
+    const m = s.match(/Start(?:ing)?\s*:?\s*(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/i);
     if (!m) return null;
-    return new Date(+m[3], +m[2] - 1, +m[1]);
+    let y = +m[3];
+    if (y < 100) y += 2000;
+    return civilDate(y, +m[2], +m[1]);
   }
 
   function parseStartInput(raw) {
-    const str = String(raw || '').replace(/^start\s+/i, '').replace(/\s+/g, ' ').trim();
+    const str = String(raw || '').replace(/^start(?:ing)?\s*:?\s*/i, '').replace(/\s+/g, ' ').trim();
     if (!str) return null;
-    let m = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-    if (m) return dateKey(new Date(+m[3], +m[2] - 1, +m[1]));
+    let m = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+    if (m) {
+      let y = +m[3];
+      if (y < 100) y += 2000;
+      return dateKey(civilDate(y, +m[2], +m[1]));
+    }
     m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    if (m) return dateKey(new Date(+m[1], +m[2] - 1, +m[3]));
+    if (m) return dateKey(civilDate(+m[1], +m[2], +m[3]));
     m = str.match(/^(\d{1,2})\s+([A-Za-z]{3})\.?\s+(\d{4})$/);
-    if (m && MONTHS[m[2].toLowerCase()] != null) return dateKey(new Date(+m[3], MONTHS[m[2].toLowerCase()], +m[1]));
+    if (m && MONTHS[m[2].toLowerCase()] != null) return dateKey(civilDate(+m[3], MONTHS[m[2].toLowerCase()] + 1, +m[1]));
     return dateKey(parseStartDate('Start ' + str));
   }
 
@@ -298,7 +315,9 @@
         width: 100%;
         border-collapse: separate;
         background: inherit;
+        table-layout: auto;
       }
+      #${RANGE_TABLE_ID} thead { display: table-header-group; }
       #${RANGE_BANNER_ID} {
         margin: 8px 0;
         padding: 8px 12px;
@@ -422,10 +441,44 @@
     document.querySelectorAll('[data-sth-col="start"]').forEach((el) => el.remove());
   }
 
+  function journeyHeaderTable() {
+    const th = [...document.querySelectorAll('thead th[data-name="subject"], th[data-name="subject"]')]
+      .find((el) => !el.closest(`#${RANGE_TABLE_ID}`));
+    return th?.closest('table') || null;
+  }
+
+  function journeyBodyTable() {
+    for (const row of document.querySelectorAll('tr.et-tr')) {
+      if (row.closest(`#${RANGE_TABLE_ID}`) || row.closest('thead')) continue;
+      return row.closest('table');
+    }
+    return null;
+  }
+
+  function journeyShell() {
+    const header = journeyHeaderTable();
+    const body = journeyBodyTable();
+    const wrapOf = (el) => el?.closest('.ember-table, .et-table, [class*="ember-table"]');
+    const hWrap = wrapOf(header);
+    const bWrap = wrapOf(body);
+    if (hWrap && bWrap && (hWrap === bWrap || hWrap.contains(bWrap))) return hWrap;
+    if (bWrap && hWrap && bWrap.contains(hWrap)) return bWrap;
+    if (header && body && header !== body) {
+      let p = header.parentElement;
+      let steps = 0;
+      while (p && steps < 6 && p !== document.body) {
+        if (p.contains(body)) return p;
+        p = p.parentElement;
+        steps += 1;
+      }
+    }
+    return hWrap || bWrap || body || header;
+  }
+
   function visibleJourneyTable() {
     return document.getElementById(RANGE_TABLE_ID)
-      || document.querySelector(`table[${SRC_ATTR}="1"]`)
-      || document.querySelector('thead th[data-name="subject"]')?.closest('table')
+      || journeyBodyTable()
+      || journeyHeaderTable()
       || document;
   }
 
@@ -434,10 +487,16 @@
       removeStartColumn();
       return;
     }
-    const table = visibleJourneyTable();
-    const subjectTh = table.querySelector?.('thead th[data-name="subject"]') || document.querySelector('thead th[data-name="subject"]');
+    const rowTable = items[0]?.row.closest('table') || document.getElementById(RANGE_TABLE_ID) || visibleJourneyTable();
+    if (rowTable && rowTable.id === RANGE_TABLE_ID && !rowTable.querySelector('thead th[data-name="subject"]')) {
+      const liveHead = journeyHeaderTable()?.querySelector('thead');
+      if (liveHead) rowTable.insertBefore(liveHead.cloneNode(true), rowTable.firstChild);
+    }
+    const table = rowTable || visibleJourneyTable();
+    const subjectTh = table.querySelector?.('thead th[data-name="subject"]')
+      || table.querySelector?.('th[data-name="subject"]');
     if (!subjectTh) return;
-    let th = table.querySelector?.('thead th[data-sth-col="start"]') || subjectTh.parentElement.querySelector('th[data-sth-col="start"]');
+    let th = table.querySelector?.('th[data-sth-col="start"]');
     if (!th) {
       th = document.createElement('th');
       th.dataset.sthCol = 'start';
@@ -487,6 +546,15 @@
     return String(el?.getAttribute('title') || el?.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
+  function rowTitle(row) {
+    const titled = row.querySelector('td[data-name="subject"] [title], td[data-name="ticket_subject"] [title], a.subject-cell [title], a[href] [title]');
+    const attr = titled?.getAttribute('title') || '';
+    const text = cellText(row, 'td[data-name="subject"]') || cellText(row, 'a.subject-cell') || cellText(row, 'td[data-name="ticket_subject"]');
+    if (parseStartDate(attr)) return attr;
+    if (parseStartDate(text)) return text;
+    return attr || text;
+  }
+
   function ticketHref(row) {
     const a = row.querySelector('a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"]');
     if (!a) return null;
@@ -527,15 +595,16 @@
   function collectRows(root) {
     const now = Date.now();
     const out = [];
-    const scope = root || document.getElementById(RANGE_TABLE_ID) || document;
+    const staticTbl = document.getElementById(RANGE_TABLE_ID);
+    const scope = root || staticTbl || document;
     scope.querySelectorAll('tr.et-tr').forEach((row, idx) => {
       if (row.closest('thead')) return;
       if (row.classList.contains(HIDE_MARK)) return;
+      if (staticTbl && scope !== staticTbl && !staticTbl.contains(scope) && row.closest(`#${RANGE_TABLE_ID}`)) return;
       if (!row.dataset.sthOrd) row.dataset.sthOrd = String(idx);
       const updatedEl = row.querySelector('td[data-name="updated_at_date"] [data-test-id="date-cell"]');
       const createdEl = row.querySelector('td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]');
-      const titleEl = row.querySelector('td[data-name="subject"] [title], td[data-name="ticket_subject"] [title], a.subject-cell [title]');
-      const title = titleEl?.getAttribute('title') || cellText(row, 'a.subject-cell');
+      const title = rowTitle(row);
       const updated = parseTicketDate(updatedEl?.getAttribute('title') || updatedEl?.textContent);
       const created = parseTicketDate(createdEl?.getAttribute('title') || createdEl?.textContent);
       const statusAge = rowStatusAge(row);
@@ -626,8 +695,9 @@
   }
 
   function sourceTable() {
-    return document.querySelector(`table[${SRC_ATTR}="1"]`)
-      || document.querySelector('thead th[data-name="subject"]')?.closest('table');
+    return journeyBodyTable()
+      || document.querySelector(`table[${SRC_ATTR}="1"]`)
+      || journeyHeaderTable();
   }
 
   function rowHrefOf(row) {
@@ -668,8 +738,7 @@
 
   function liveJourneyTable() {
     const staticTbl = document.getElementById(RANGE_TABLE_ID);
-    const src = document.querySelector(`table[${SRC_ATTR}="1"]`)
-      || document.querySelector('thead th[data-name="subject"]')?.closest('table');
+    const src = journeyBodyTable();
     if (!src || src === staticTbl) return null;
     return src;
   }
@@ -757,11 +826,22 @@
   }
 
   function hideSourceChrome(on) {
-    const src = sourceTable();
-    if (src) {
-      src.setAttribute(SRC_ATTR, '1');
-      setHiddenFlag(src, on);
-    }
+    const targets = new Set();
+    const shell = journeyShell();
+    const header = journeyHeaderTable();
+    const body = journeyBodyTable();
+    if (shell && shell !== document.body && shell !== document.documentElement) targets.add(shell);
+    if (header) targets.add(header);
+    if (body) targets.add(body);
+    [header, body].forEach((el) => {
+      const wrap = el?.closest('.ember-table-overflow, .et-table-scroll, .ember-table');
+      if (wrap && wrap !== document.body) targets.add(wrap);
+    });
+    targets.forEach((el) => {
+      if (!el || el.id === RANGE_TABLE_ID || el.closest?.(`#${RANGE_TABLE_ID}`)) return;
+      if (on) el.setAttribute(SRC_ATTR, '1');
+      setHiddenFlag(el, on);
+    });
     pagerRoots().forEach((el) => setHiddenFlag(el, on));
     document.querySelectorAll('occluded-content').forEach((el) => setHiddenFlag(el, on));
   }
@@ -772,7 +852,8 @@
       el?.remove();
       return;
     }
-    const src = sourceTable();
+    const shell = journeyShell();
+    const src = shell || journeyHeaderTable() || sourceTable();
     if (!el) {
       el = document.createElement('div');
       el.id = RANGE_BANNER_ID;
@@ -782,29 +863,38 @@
   }
 
   function mountStaticRows(rowEls) {
-    const src = sourceTable();
+    const headerTable = journeyHeaderTable();
+    const bodyTable = journeyBodyTable();
+    const shell = journeyShell();
+    const src = headerTable || bodyTable;
     if (!src) return null;
+    const inRangeRows = rowEls.filter((row) => startInRange({ startKey: dateKey(parseStartDate(rowTitle(row))) }));
     let table = document.getElementById(RANGE_TABLE_ID);
     if (!table) {
-      table = src.cloneNode(false);
+      table = (headerTable || src).cloneNode(false);
       table.id = RANGE_TABLE_ID;
       table.removeAttribute(HIDE_ATTR);
       table.removeAttribute(SRC_ATTR);
-      const thead = src.querySelector('thead');
+      const thead = headerTable?.querySelector('thead') || src.querySelector('thead');
       if (thead) table.appendChild(thead.cloneNode(true));
       table.appendChild(document.createElement('tbody'));
-      src.parentNode.insertBefore(table, src);
+      const before = shell || headerTable || bodyTable || src;
+      before.parentNode.insertBefore(table, before);
+    }
+    if (!table.querySelector('thead th[data-name="subject"]')) {
+      const thead = headerTable?.querySelector('thead');
+      if (thead) table.insertBefore(thead.cloneNode(true), table.firstChild);
     }
     const tbody = table.tBodies[0] || table.appendChild(document.createElement('tbody'));
     tbody.replaceChildren();
-    rowEls.forEach((row, i) => {
+    inRangeRows.forEach((row, i) => {
       const tr = row.cloneNode(true);
       sanitizeClone(tr);
       tr.dataset.sthOrd = String(i);
       tbody.appendChild(tr);
     });
     hideSourceChrome(true);
-    rewriteCountLabels(rowEls.length);
+    rewriteCountLabels(inRangeRows.length);
     return table;
   }
 
@@ -834,16 +924,7 @@
   }
 
   function recordStartKey(rec) {
-    const subject = recordSubject(rec);
-    let key = dateKey(parseStartDate(subject));
-    if (key) return key;
-    const fields = rec.fields || rec.custom_fields || rec.attributes || {};
-    for (const k of Object.keys(fields)) {
-      if (!/join|start|date/i.test(k)) continue;
-      key = parseStartInput(fields[k]) || dateKey(parseTicketDate(String(fields[k] || '')));
-      if (key) return key;
-    }
-    return parseStartInput(rec.start_date || rec.date_of_joining || rec.joining_date);
+    return dateKey(parseStartDate(recordSubject(rec)));
   }
 
   function recordInRange(rec) {
@@ -888,6 +969,24 @@
     if (initiator) {
       const cell = tr.querySelector('.requester-cell-name, td[data-name="initiator"] a, td[data-name="initiator"]');
       if (cell) cell.textContent = initiator;
+    }
+    const start = parseStartDate(subject);
+    const startKey = dateKey(start);
+    let startTd = tr.querySelector('td[data-sth-col="start"]');
+    const subjectTd = tr.querySelector('td[data-name="subject"]');
+    if (!startTd && subjectTd) {
+      startTd = document.createElement('td');
+      startTd.dataset.sthCol = 'start';
+      startTd.className = 'ember-view sth-start-cell';
+      subjectTd.after(startTd);
+    }
+    if (startTd) {
+      if (startKey) startTd.dataset.startKey = startKey;
+      else delete startTd.dataset.startKey;
+      const label = prettyStart(start);
+      startTd.innerHTML = label
+        ? `<span title="Start ${formatStart(startKey)}">${label}</span>`
+        : '<span class="sth-empty">—</span>';
     }
     return tr;
   }
@@ -955,7 +1054,7 @@
       try {
         const records = await fetchAllPages(base);
         if (!records.length) continue;
-        const rows = records.filter(recordInRange).map((rec) => sanitizeClone(fillRowFromRecord(template.cloneNode(true), rec)));
+        const rows = records.filter((rec) => recordStartKey(rec) && recordInRange(rec)).map((rec) => sanitizeClone(fillRowFromRecord(template.cloneNode(true), rec)));
         return { rows, scanned: records.length, complete: true };
       } catch {
         continue;
@@ -969,7 +1068,7 @@
   }
 
   async function harvestByPager(token, map) {
-    const src = () => document.querySelector(`table[${SRC_ATTR}="1"]`) || sourceTable();
+    const src = () => journeyBodyTable() || sourceTable();
     let scanned = collectRows(src() || document).length;
     let pages = 1;
     while (pages < MAX_HARVEST_PAGES) {
@@ -1070,7 +1169,11 @@
 
   function paintList() {
     clearMarks();
-    const items = collectRows();
+    let items = collectRows();
+    if (moduleId === 'journeys' && rangeActive()) {
+      items.filter((item) => !startInRange(item)).forEach((item) => item.row.remove());
+      items = items.filter((item) => startInRange(item) && item.row.isConnected);
+    }
     const hits = items.filter(itemMatches);
     if (page().enabled) {
       hits.forEach((item) => {
@@ -1101,7 +1204,7 @@
       paintList();
       return;
     }
-    const src = sourceTable();
+    const src = journeyBodyTable() || sourceTable();
     const sourceItems = collectRows(src || document);
     rangeViewKey = key;
     rangeComplete = false;
