@@ -1,7 +1,8 @@
 // Human: AND/OR matching for idle age, status tags, start dates, progress, and start-within.
-// Agent: PURE. Empty status/start tags are ignored in AND mode (do not require a match). Date range is not part of highlight matching.
+// Agent: PURE. When page.filters is set, CALLS firstMatchingFilter (order + color). Else uses the legacy live recipe so old tests/payloads still work. Date range is not part of highlight matching.
 
-import type { Matchable, PageSettings } from './types';
+import { firstMatchingFilter } from './filters';
+import type { Matchable, ModuleId, PageSettings } from './types';
 
 export function statusWanted(item: Matchable, cfg: PageSettings): boolean {
   const tags = (cfg.statuses || []).map((s) => s.toLowerCase());
@@ -15,7 +16,10 @@ export function startWanted(item: Matchable, cfg: PageSettings): boolean {
   return !!(item.startKey && tags.includes(item.startKey));
 }
 
-export function itemMatches(item: Matchable, cfg: PageSettings): boolean {
+export function itemMatches(item: Matchable, cfg: PageSettings, moduleId: ModuleId = 'tickets'): boolean {
+  if (Array.isArray(cfg.filters) && cfg.filters.length) {
+    return !!firstMatchingFilter(item, cfg, moduleId);
+  }
   const stale = item.idleDays != null && item.idleDays >= cfg.days;
   const byStatus = statusWanted(item, cfg);
   const byStart = startWanted(item, cfg);

@@ -27,6 +27,17 @@ describe('buildTicketFilterQuery', () => {
     expect(q).toBe("updated_at:<'2026-08-29'");
   });
 
+  it('ORs each enabled filter query', () => {
+    const cfg = defaultPage({
+      filters: [
+        { id: 'a', name: 'A', builtin: false, enabled: true, color: '#e65100', matchMode: 'or', criteria: { idleDays: 6 } },
+        { id: 'b', name: 'B', builtin: false, enabled: true, color: '#1565c0', matchMode: 'or', criteria: { statuses: ['Pending'] } },
+      ],
+    });
+    const q = buildTicketFilterQuery(cfg, names, now);
+    expect(q).toBe("(updated_at:<'2026-08-29') OR (status:3)");
+  });
+
   it('does not fold the date-range overlay into idle/status matching', () => {
     const q = buildTicketFilterQuery(
       defaultPage({ days: 6, matchMode: 'or', statuses: ['Open'], startFrom: '2026-09-01', startTo: '2026-09-14' }),

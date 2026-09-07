@@ -14,16 +14,15 @@ function spec(id: string) {
 
 describe('featureVisible', () => {
   it('shows list filters only on list surfaces', () => {
-    expect(featureVisible(spec('list-age'), listTickets)).toBe(true);
-    expect(featureVisible(spec('list-age'), detailTickets)).toBe(false);
+    expect(featureVisible(spec('list-filters'), listTickets)).toBe(true);
+    expect(featureVisible(spec('list-filters'), detailTickets)).toBe(false);
     expect(featureVisible(spec('list-range'), listTickets)).toBe(true);
     expect(featureVisible(spec('list-range'), listJourneys)).toBe(true);
   });
 
-  it('shows start-date only on journey lists', () => {
-    expect(featureVisible(spec('start'), listJourneys)).toBe(true);
-    expect(featureVisible(spec('start'), listTickets)).toBe(false);
-    expect(featureVisible(spec('extra'), listTickets)).toBe(false);
+  it('shows filters on ticket and journey lists', () => {
+    expect(featureVisible(spec('list-filters'), listJourneys)).toBe(true);
+    expect(featureVisible(spec('list-filters'), listTickets)).toBe(true);
   });
 
   it('shows the empty hint off-list', () => {

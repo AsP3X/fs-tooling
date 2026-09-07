@@ -2,8 +2,9 @@
 // Agent: READS/WRITES STORAGE_KEY. Always merge onto defaults and normalize arrays/enums so old payloads keep working. fabX/fabY are the collapsed dock; missing keys stay null.
 
 import { STORAGE_KEY, defaultSettings } from './constants';
+import { mergeFilterList } from './filters';
 import { normalizeRange } from './range';
-import type { MatchMode, PageSettings, Settings, SortDir, SortKey } from './types';
+import type { MatchMode, ModuleId, PageSettings, Settings, SortDir, SortKey } from './types';
 
 function isMatchMode(v: unknown): v is MatchMode {
   return v === 'and' || v === 'or';
@@ -17,17 +18,19 @@ function isSortKey(v: unknown): v is SortKey {
   return v === 'default' || v === 'start' || v === 'created' || v === 'status' || v === 'initiator' || v === 'progress';
 }
 
-export function normalizePage(page: PageSettings): PageSettings {
+export function normalizePage(page: PageSettings, moduleId: ModuleId = 'tickets'): PageSettings {
   const next = { ...page };
   if (!Array.isArray(next.statuses)) next.statuses = [];
   if (!Array.isArray(next.presets)) next.presets = [];
   if (!Array.isArray(next.startDates)) next.startDates = [];
+  if (!Array.isArray(next.filters)) next.filters = [];
   const range = normalizeRange(next.startFrom, next.startTo);
   next.startFrom = range.startFrom;
   next.startTo = range.startTo;
   if (!isMatchMode(next.matchMode) || next.matchMode !== 'and') next.matchMode = 'or';
   if (!isSortKey(next.sortKey)) next.sortKey = 'default';
   if (!isSortDir(next.sortDir) || next.sortDir !== 'desc') next.sortDir = 'asc';
+  next.filters = mergeFilterList(next, moduleId);
   return next;
 }
 
@@ -53,8 +56,8 @@ export function normalizeSettings(raw: Settings): Settings {
     y: panel ? panel.y : null,
     fabX: fab ? fab.x : null,
     fabY: fab ? fab.y : null,
-    tickets: normalizePage(raw.tickets),
-    journeys: normalizePage(raw.journeys),
+    tickets: normalizePage(raw.tickets, 'tickets'),
+    journeys: normalizePage(raw.journeys, 'journeys'),
     uiOpen: { ...(raw.uiOpen || {}) },
   };
   return next;

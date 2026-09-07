@@ -2,8 +2,9 @@
 // Agent: PURE. Date operator :< is inclusive LTE per FS docs. Unknown status names are dropped.
 
 import { MS_DAY } from '../constants';
+import { enabledFilters } from '../filters';
 import { normalizeRange, shiftDateKey } from '../range';
-import type { PageSettings } from '../types';
+import type { FilterRule, MatchMode, PageSettings } from '../types';
 
 export function idleCutoffDate(days: number, now: number = Date.now()): string {
   const d = new Date(now - days * MS_DAY);
@@ -13,20 +14,46 @@ export function idleCutoffDate(days: number, now: number = Date.now()): string {
   return `${y}-${m}-${day}`;
 }
 
+function statusClause(statuses: unknown, nameToId: Map<string, number>): string {
+  const statusIds = (Array.isArray(statuses) ? statuses : [])
+    .map((s) => nameToId.get(String(s).toLowerCase()))
+    .filter((id): id is number => id != null);
+  return statusIds.map((id) => `status:${id}`).join(' OR ');
+}
+
+function combineIdleAndStatus(idle: string | null, statusPart: string, matchMode: MatchMode): string {
+  if (idle && statusPart) {
+    return matchMode === 'and' ? `(${statusPart}) AND ${idle}` : `${statusPart} OR ${idle}`;
+  }
+  return idle || statusPart;
+}
+
+export function buildRuleTicketQuery(
+  rule: FilterRule,
+  nameToId: Map<string, number>,
+  now: number = Date.now(),
+): string {
+  const days = typeof rule.criteria.idleDays === 'number' ? rule.criteria.idleDays : null;
+  const idle = days != null ? `updated_at:<'${idleCutoffDate(days, now)}'` : null;
+  const statusPart = statusClause(rule.criteria.statuses, nameToId);
+  return combineIdleAndStatus(idle, statusPart, rule.matchMode === 'and' ? 'and' : 'or');
+}
+
 export function buildTicketFilterQuery(
   cfg: PageSettings,
   nameToId: Map<string, number>,
   now: number = Date.now(),
 ): string {
-  const idle = `updated_at:<'${idleCutoffDate(cfg.days, now)}'`;
-  const statusIds = (cfg.statuses || [])
-    .map((s) => nameToId.get(s.toLowerCase()))
-    .filter((id): id is number => id != null);
-  const statusPart = statusIds.map((id) => `status:${id}`).join(' OR ');
-  if (cfg.matchMode === 'and') {
-    return statusPart ? `(${statusPart}) AND ${idle}` : idle;
+  const enabled = enabledFilters(cfg);
+  if (enabled.length) {
+    const parts = enabled.map((rule) => buildRuleTicketQuery(rule, nameToId, now)).filter(Boolean);
+    if (!parts.length) return '';
+    if (parts.length === 1) return parts[0];
+    return parts.map((p) => `(${p})`).join(' OR ');
   }
-  return statusPart ? `${statusPart} OR ${idle}` : idle;
+  const idle = `updated_at:<'${idleCutoffDate(cfg.days, now)}'`;
+  const statusPart = statusClause(cfg.statuses, nameToId);
+  return combineIdleAndStatus(idle, statusPart, cfg.matchMode === 'and' ? 'and' : 'or');
 }
 
 // Human: Inclusive calendar from–to on updated_at. `:<` is LTE of that timestamp, so To is bumped one UTC day.

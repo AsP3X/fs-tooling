@@ -12,6 +12,7 @@ src/
     context.ts          list / detail / other + module
     dates.ts            Ticket cell dates + journey Start-from-title
     match.ts            AND/OR idle / status / start / progress
+    filters.ts          Ordered colored highlight rules + criterion registry
     range.ts            Inclusive from–to keys for the results overlay
     secrets.ts          Message the worker (or sessionStorage in userscripts)
     updates.ts          GitHub latest-release compare + dismiss rule
@@ -67,6 +68,14 @@ To add a new context-specific card without restyling the panel:
 1. Implement a `PanelFeature` (`id`, `modules`, `surfaces`, `mount`, optional `sync`).
 2. Call `registerPanelFeature` from a module imported by `src/content.ts`.
 3. Reuse existing classes (`card`, `tagbox`, `chip`, `hint`, …). The plugin host is `#featureMount`.
+
+## Highlight filters
+
+Each module has an ordered list of **filters** (defaults + custom). Each filter has a color, All/Any matching, and an extensible `criteria` bag. Criteria are registered in `src/lib/filters.ts` (`registerCriterion` / `registerFilterPage`) so a new list type can add dimensions without rewriting the panel.
+
+Enabled filters run **in list order**. The first match paints the row in that filter’s color. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
+
+Built-in criteria stay locked; users duplicate a default to customize it. `sth-settings-v2` still holds the live recipe fields for compatibility; `filters` is merged on load.
 
 ## Matching
 

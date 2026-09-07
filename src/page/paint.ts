@@ -5,10 +5,10 @@
 import { enrichList } from '../lib/api/enrich';
 import { CELL_MARK, ROW_MARK } from '../lib/constants';
 import { detectModule } from '../lib/detect';
-import { itemMatches } from '../lib/match';
+import { firstMatchingFilter } from '../lib/filters';
 import { collectRows, rowTbody } from '../lib/rows';
 import { compareItems } from '../lib/sort';
-import { getLastMarkedUrls, getSettings, page, setLastMarkedUrls, setLastReportables, setLastStats, setModuleId } from '../lib/state';
+import { getLastMarkedUrls, getModuleId, getSettings, page, setLastMarkedUrls, setLastReportables, setLastStats, setModuleId } from '../lib/state';
 import type { RowItem, SortKey } from '../lib/types';
 import { runtime } from './runtime';
 import { injectStartColumn } from './start-column';
@@ -19,25 +19,32 @@ export function clearMarks(doc: Document = document): void {
   doc.querySelectorAll(`.${ROW_MARK}`).forEach((el) => {
     el.classList.remove(ROW_MARK);
     el.removeAttribute('data-stale-days');
+    (el as HTMLElement).style.removeProperty('--sth-mark');
   });
   doc.querySelectorAll(`.${CELL_MARK}`).forEach((el) => el.classList.remove(CELL_MARK));
 }
 
 /** Add/remove highlight classes without blanking the current set first. */
-export function syncRowMarks(hits: RowItem[], enabled: boolean, doc: Document = document): void {
-  const hitRows = new Set(enabled ? hits.map((h) => h.row) : []);
-  const hitCells = new Set(enabled ? hits.map((h) => h.cell).filter((c): c is Element => !!c) : []);
+export function syncRowMarks(
+  hits: Array<{ item: RowItem; color: string }>,
+  enabled: boolean,
+  doc: Document = document,
+): void {
+  const hitRows = new Set(enabled ? hits.map((h) => h.item.row) : []);
+  const hitCells = new Set(enabled ? hits.map((h) => h.item.cell).filter((c): c is Element => !!c) : []);
   doc.querySelectorAll(`tr.${ROW_MARK}`).forEach((el) => {
     if (hitRows.has(el as HTMLTableRowElement)) return;
     el.classList.remove(ROW_MARK);
     el.removeAttribute('data-stale-days');
+    (el as HTMLElement).style.removeProperty('--sth-mark');
   });
   doc.querySelectorAll(`.${CELL_MARK}`).forEach((el) => {
     if (!hitCells.has(el)) el.classList.remove(CELL_MARK);
   });
   if (!enabled) return;
-  hits.forEach((item) => {
+  hits.forEach(({ item, color }) => {
     item.row.classList.add(ROW_MARK);
+    item.row.style.setProperty('--sth-mark', color);
     if (item.idleDays != null) item.row.dataset.staleDays = String(Math.floor(item.idleDays));
     else item.row.removeAttribute('data-stale-days');
     if (item.cell) item.cell.classList.add(CELL_MARK);
@@ -83,8 +90,13 @@ export async function paintList(doc: Document = document, force = false): Promis
   const enrich = await enrichList(scraped, force);
   if (gen !== paintGen) return;
   const items = enrich.items;
-  const hits = items.filter((item) => itemMatches(item, page()));
-  syncRowMarks(hits, page().enabled, doc);
+  const moduleId = getModuleId();
+  const cfg = page();
+  const hits = items.flatMap((item) => {
+    const rule = firstMatchingFilter(item, cfg, moduleId);
+    return rule ? [{ item, color: rule.color }] : [];
+  });
+  syncRowMarks(hits, cfg.enabled, doc);
   const extraMarked = enrich.extraMarked;
   setLastStats({
     tickets: items.length,
@@ -92,7 +104,7 @@ export async function paintList(doc: Document = document, force = false): Promis
     extraMarked,
     fromApi: enrich.fromApi,
   });
-  const visibleUrls = hits.map((x) => x.href).filter((u): u is string => !!u);
+  const visibleUrls = hits.map((x) => x.item.href).filter((u): u is string => !!u);
   setLastMarkedUrls([...new Set([...visibleUrls, ...enrich.extraUrls])]);
   setLastReportables(enrich.reportables.length ? enrich.reportables : items, {
     truncated: enrich.truncated,

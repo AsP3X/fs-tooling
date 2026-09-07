@@ -49,6 +49,8 @@ describe('loadSettings', () => {
     expect(s.journeys.color).toBe('#1565c0');
     expect(s.tickets.matchMode).toBe('or');
     expect(s.tickets.sortDir).toBe('asc');
+    expect(s.tickets.filters.some((f) => f.id === 'idle-6' && f.enabled)).toBe(true);
+    expect(s.journeys.filters.some((f) => f.id === 'idle-7' && f.enabled)).toBe(true);
   });
 
   it('merges nested page settings onto defaults', () => {

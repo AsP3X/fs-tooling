@@ -35,7 +35,7 @@ describe('syncRowMarks', () => {
     document.body.innerHTML = '<table><tbody><tr class="et-tr sth-row" id="a"></tr><tr class="et-tr sth-row" id="b"></tr></tbody></table>';
     const a = document.getElementById('a') as HTMLTableRowElement;
     const b = document.getElementById('b') as HTMLTableRowElement;
-    syncRowMarks([row({ row: a })], true, document);
+    syncRowMarks([{ item: row({ row: a }), color: '#e65100' }], true, document);
     expect(a.classList.contains(ROW_MARK)).toBe(true);
     expect(b.classList.contains(ROW_MARK)).toBe(false);
   });
@@ -45,7 +45,7 @@ describe('syncRowMarks', () => {
     const td = document.getElementById('c') as HTMLTableCellElement;
     const tr = td.parentElement as HTMLTableRowElement;
     tr.classList.add(ROW_MARK);
-    syncRowMarks([row({ row: tr, cell: td })], false, document);
+    syncRowMarks([{ item: row({ row: tr, cell: td }), color: '#e65100' }], false, document);
     expect(tr.classList.contains(ROW_MARK)).toBe(false);
     expect(td.classList.contains(CELL_MARK)).toBe(false);
   });

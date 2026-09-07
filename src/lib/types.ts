@@ -20,6 +20,26 @@ export interface Preset {
   startTo?: string | null;
 }
 
+/** Extensible bag of highlight dimensions. Unknown keys are ignored until a criterion is registered. */
+export interface FilterCriteria {
+  idleDays?: number | null;
+  statuses?: string[];
+  startDates?: string[];
+  maxProgress?: number | null;
+  startWithin?: number | null;
+  [key: string]: unknown;
+}
+
+export interface FilterRule {
+  id: string;
+  name: string;
+  builtin: boolean;
+  enabled: boolean;
+  color: string;
+  matchMode: MatchMode;
+  criteria: FilterCriteria;
+}
+
 export interface PageSettings {
   days: number;
   color: string;
@@ -38,6 +58,8 @@ export interface PageSettings {
   startOpen: boolean;
   sortKey: SortKey;
   sortDir: SortDir;
+  /** Ordered highlight rules. First enabled match paints the row. */
+  filters: FilterRule[];
 }
 
 export interface Settings {

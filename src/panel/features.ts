@@ -20,14 +20,9 @@ export interface PanelFeature extends FeatureSpec {
 /** Built-in cards already in panel.html. New work should registerPanelFeature instead of growing ui.ts. */
 export const BUILTIN_FEATURES: FeatureSpec[] = [
   { id: 'list-chrome', modules: ['tickets', 'journeys'], surfaces: ['list'] },
-  { id: 'list-age', modules: ['tickets', 'journeys'], surfaces: ['list'] },
-  { id: 'list-match', modules: ['tickets', 'journeys'], surfaces: ['list'] },
+  { id: 'list-filters', modules: ['tickets', 'journeys'], surfaces: ['list'] },
   { id: 'list-range', modules: ['tickets', 'journeys'], surfaces: ['list'] },
-  { id: 'extra', modules: ['journeys'], surfaces: ['list'] },
   { id: 'list-sort', modules: ['tickets', 'journeys'], surfaces: ['list'] },
-  { id: 'list-status', modules: ['tickets', 'journeys'], surfaces: ['list'] },
-  { id: 'start', modules: ['journeys'], surfaces: ['list'] },
-  { id: 'list-color', modules: ['tickets', 'journeys'], surfaces: ['list'] },
   { id: 'list-foot', modules: ['tickets', 'journeys'], surfaces: ['list'] },
   { id: 'empty-hint', modules: ['global'], surfaces: ['detail', 'other'] },
 ];

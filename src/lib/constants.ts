@@ -69,6 +69,7 @@ export function defaultPage(overrides: Partial<PageSettings> = {}): PageSettings
     startOpen: false,
     sortKey: 'default',
     sortDir: 'asc',
+    filters: [],
     ...overrides,
   };
 }

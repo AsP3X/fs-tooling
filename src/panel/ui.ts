@@ -1,10 +1,11 @@
-// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, settings (API key + About), GitHub update toast, drag position.
+// Human: Shadow-DOM ops panel: quick filter chips, sort, date-range overlay, Manage dialog, GitHub update toast, drag position.
 // Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on highlight-filter changes. Range overlay CALLS listRangeResults and does not mutate the host table.
 
 import { listRangeResults } from '../lib/api/enrich';
 import { contextLabel, detectContext } from '../lib/context';
-import { HISTORY_KEY, HOST_DEFAULT_INSET_PX, JOURNEY_PRESETS, TICKET_PRESETS } from '../lib/constants';
-import { formatStart, parseStartInput } from '../lib/dates';
+import { HISTORY_KEY, HOST_DEFAULT_INSET_PX } from '../lib/constants';
+import { formatStart } from '../lib/dates';
+import { accentColor } from '../lib/filters';
 import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
@@ -14,13 +15,14 @@ import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
 import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
 import { buildReport } from '../lib/stats';
 import { escapeHtml, fmtDur } from '../lib/text';
-import type { MatchMode, ModuleSetting, PageSettings, Preset, SortDir, SortKey } from '../lib/types';
+import type { FilterRule, ModuleSetting, PageSettings, SortDir, SortKey } from '../lib/types';
 import { markTickets, openMarked, paintList } from '../page/paint';
 import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
 import { syncStartColumnHeader } from '../page/start-column';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
 import { initAbout } from './about';
+import { initManage } from './manage';
 import { initUpdateToast } from './update-toast';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
@@ -45,13 +47,6 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const didDrag = { current: false };
   let rangeDraft: { startFrom: string | null; startTo: string | null } | null = null;
   let rangeDraftModule: ReturnType<typeof getModuleId> | null = null;
-
-  function builtinPresets(): Preset[] {
-    return getModuleId() === 'journeys' ? JOURNEY_PRESETS : TICKET_PRESETS;
-  }
-  function allPresets(): Preset[] {
-    return [...builtinPresets(), ...(page().presets || [])];
-  }
 
   function barsHtml(buckets: Array<{ key: string; n: number }>): string {
     const max = Math.max(1, ...buckets.map((b) => b.n));
@@ -281,7 +276,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const key = await getApiKey();
     const present = !!key.trim();
     $('apiKeyStatus').textContent = present ? `Saved · ${maskApiKey(key)}` : 'No key saved';
-    $('settingsSub').textContent = present ? 'API key saved · About' : 'API key · About';
+    $('settingsSub').textContent = present ? 'Filters · API key saved' : 'Filters · Settings';
     setApiKeyPresent(present);
     if (!present && resultsOpen) {
       resultsOpen = false;
@@ -291,135 +286,27 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     syncStartColumnHeader();
   }
 
-  function discoveredStatuses(): string[] {
-    return [...new Set(collectRows().map((r) => r.status).filter((s) => s && s !== '—'))].sort((a, b) => a.localeCompare(b));
-  }
-  function discoveredStarts(): string[] {
-    return [...new Set(collectRows().map((r) => r.startKey).filter((s): s is string => !!s))].sort();
-  }
-
-  function renderStatusTags(): void {
-    const wrap = $('statusTags');
-    const hints = $('statusHints');
-    const cfg = page();
-    wrap.innerHTML = cfg.statuses.map((s) => `<span class="tag">${escapeHtml(s)}<button type="button" data-remove="${escapeHtml(s)}">×</button></span>`).join('');
-    wrap.querySelectorAll('button[data-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const remove = (btn as HTMLElement).dataset.remove || '';
-        updatePage({ statuses: cfg.statuses.filter((s) => s.toLowerCase() !== remove.toLowerCase()), activePreset: null });
-      });
-    });
-    const selected = new Set(cfg.statuses.map((s) => s.toLowerCase()));
-    hints.innerHTML = discoveredStatuses().filter((s) => !selected.has(s.toLowerCase()))
-      .map((s) => `<button type="button" class="chip" data-add="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('');
-    hints.querySelectorAll('button[data-add]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const add = (btn as HTMLElement).dataset.add || '';
-        if (cfg.statuses.some((s) => s.toLowerCase() === add.toLowerCase())) return;
-        updatePage({ statuses: [...cfg.statuses, add], activePreset: null });
-      });
-    });
-  }
-
-  function addStartDate(raw: string): void {
-    const key = parseStartInput(raw);
-    if (!key) return;
-    if ((page().startDates || []).includes(key)) return;
-    updatePage({ startDates: [...(page().startDates || []), key], activePreset: null });
-  }
-
-  function renderStartTags(): void {
-    const wrap = $('startTags');
-    const hints = $('startHints');
-    const cfg = page();
-    wrap.innerHTML = (cfg.startDates || []).map((s) =>
-      `<span class="tag">${escapeHtml(formatStart(s))}<button type="button" data-remove="${escapeHtml(s)}">×</button></span>`,
+  let chipSig = '';
+  function renderFilterChips(): void {
+    const wrap = $('filterChips');
+    const filters = page().filters || [];
+    const sig = filters.map((r) => `${r.id}:${r.enabled ? 1 : 0}:${r.color}:${r.name}`).join('|');
+    if (sig === chipSig && wrap.childElementCount === filters.length) return;
+    chipSig = sig;
+    wrap.innerHTML = filters.map((rule) =>
+      `<button type="button" class="chip filter-chip${rule.enabled ? ' on' : ''}" data-filter="${escapeHtml(rule.id)}"><span class="sw" style="background:${escapeHtml(rule.color)}"></span>${escapeHtml(rule.name)}</button>`,
     ).join('');
-    wrap.querySelectorAll('button[data-remove]').forEach((btn) => {
+    wrap.querySelectorAll('button[data-filter]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const remove = (btn as HTMLElement).dataset.remove || '';
-        updatePage({ startDates: cfg.startDates.filter((s) => s !== remove), activePreset: null });
+        const id = (btn as HTMLElement).dataset.filter || '';
+        const next = (page().filters || []).map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r));
+        applyFilters(next);
       });
-    });
-    const selected = new Set(cfg.startDates || []);
-    hints.innerHTML = discoveredStarts().filter((s) => !selected.has(s))
-      .map((s) => `<button type="button" class="chip" data-add="${escapeHtml(s)}">${escapeHtml(formatStart(s))}</button>`).join('');
-    hints.querySelectorAll('button[data-add]').forEach((btn) => {
-      btn.addEventListener('click', () => addStartDate((btn as HTMLElement).dataset.add || ''));
     });
   }
 
-  function renderViewPresets(): void {
-    const wrap = $('viewPresets');
-    const cfg = page();
-    wrap.innerHTML = allPresets().map((p) => `<button type="button" class="chip${cfg.activePreset === p.id ? ' on' : ''}" data-preset="${p.id}">${escapeHtml(p.name)}</button>`).join('');
-    wrap.querySelectorAll('button[data-preset]').forEach((btn) => {
-      btn.addEventListener('click', () => applyPreset((btn as HTMLElement).dataset.preset || ''));
-    });
-  }
-
-  function applyPreset(id: string): void {
-    const p = allPresets().find((x) => x.id === id);
-    if (!p) return;
-    rangeDraft = null;
-    rangeDraftModule = null;
-    updatePage({
-      days: p.days,
-      statuses: [...(p.statuses || [])],
-      matchMode: p.matchMode === 'and' ? 'and' : 'or',
-      maxProgress: p.maxProgress ?? null,
-      startWithin: p.startWithin ?? null,
-      startDates: [...(p.startDates || [])],
-      startFrom: p.startFrom ?? null,
-      startTo: p.startTo ?? null,
-      activePreset: p.id,
-    });
-  }
-
-  function renderExtraFilters(): void {
-    const box = $('extraFilters');
-    if (getModuleId() !== 'journeys' || detectContext(getSettings().module).surface !== 'list') {
-      box.innerHTML = '';
-      return;
-    }
-    const cfg = page();
-    box.innerHTML = `
-      <button type="button" class="tagbox-head" data-toggle="extra">
-        <span class="label">Journey extras</span>
-        <span class="chev">▸</span>
-      </button>
-      <div class="tagbox-body">
-        <div class="row-between"><span class="label">Max child progress %</span><b>${cfg.maxProgress == null ? 'off' : cfg.maxProgress + '%'}</b></div>
-        <input type="range" id="maxProgress" min="0" max="100" step="5" value="${cfg.maxProgress == null ? 100 : cfg.maxProgress}" />
-        <div class="chips">
-          <button type="button" class="chip" data-prog="">Off</button>
-          <button type="button" class="chip" data-prog="25">≤25%</button>
-          <button type="button" class="chip" data-prog="40">≤40%</button>
-          <button type="button" class="chip" data-prog="60">≤60%</button>
-        </div>
-        <div class="row-between"><span class="label">Start within days</span><b>${cfg.startWithin == null ? 'off' : cfg.startWithin + 'd'}</b></div>
-        <div class="chips">
-          <button type="button" class="chip" data-start="">Off</button>
-          <button type="button" class="chip" data-start="3">3d</button>
-          <button type="button" class="chip" data-start="7">7d</button>
-          <button type="button" class="chip" data-start="14">14d</button>
-        </div>
-      </div>`;
-    box.querySelectorAll('[data-prog]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const raw = (btn as HTMLElement).dataset.prog;
-        updatePage({ maxProgress: raw === '' ? null : Number(raw), activePreset: null });
-      });
-    });
-    box.querySelectorAll('[data-start]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const raw = (btn as HTMLElement).dataset.start;
-        updatePage({ startWithin: raw === '' ? null : Number(raw), activePreset: null });
-      });
-    });
-    box.querySelector('#maxProgress')?.addEventListener('input', (e) => {
-      updatePage({ maxProgress: Number((e.target as HTMLInputElement).value), activePreset: null });
-    });
+  function applyFilters(filters: FilterRule[]): void {
+    updatePage({ filters, color: accentColor({ ...page(), filters }, getModuleId()) });
   }
 
   function sortOptions(): Array<{ id: SortKey; name: string }> {
@@ -473,41 +360,22 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const cfg = page();
     const settings = getSettings();
     const labels = contextLabel(ctx);
+    const accent = accentColor(cfg, getModuleId());
     shadow.querySelectorAll<HTMLElement>('.panel, .fab, .logo, .toggle, input[type="range"], .primary, .update-toast').forEach((el) => {
-      el.style.setProperty('--accent', cfg.color);
+      el.style.setProperty('--accent', accent);
     });
     $('panelTitle').textContent = labels.title;
     $('fabLabel').textContent = labels.title;
     if (ctx.surface !== 'list') {
       $('panelSub').textContent = labels.sub;
       $('contextHintText').textContent = ctx.surface === 'detail'
-        ? 'List filters apply on ticket and journey tables. Use Settings for the API key.'
+        ? 'List filters apply on ticket and journey tables. Use Manage for the API key.'
         : 'Open a ticket or journeys list to use filters.';
     }
-    $('daysCaption').textContent = getModuleId() === 'journeys' ? 'Age' : 'Idle age';
     $('enabled').classList.toggle('on', cfg.enabled);
-    const days = $('days') as HTMLInputElement;
-    days.value = String(cfg.days);
-    days.style.setProperty('--p', ((cfg.days - 1) / 44) * 100 + '%');
-    $('daysLabel').textContent = `${cfg.days}d`;
-    ($('customColor') as HTMLInputElement).value = cfg.color;
-    $('dayChips').innerHTML = [3, 6, 10, 14, 21, 30].map((d) => `<button type="button" class="chip${d === cfg.days ? ' on' : ''}" data-days="${d}">${d}d</button>`).join('');
-    $('dayChips').querySelectorAll('[data-days]').forEach((btn) => {
-      btn.addEventListener('click', () => updatePage({ days: Number((btn as HTMLElement).dataset.days), activePreset: null }));
-    });
-    shadow.querySelectorAll('#matchMode button').forEach((btn) => {
-      (btn as HTMLElement).classList.toggle('on', (btn as HTMLElement).dataset.mode === cfg.matchMode);
-    });
     shadow.querySelectorAll('#moduleSeg button').forEach((btn) => {
       (btn as HTMLElement).classList.toggle('on', (btn as HTMLElement).dataset.module === settings.module);
     });
-    $('matchHint').textContent = cfg.matchMode === 'and'
-      ? 'Mark only if every selected filter matches (age, status, start).'
-      : 'Mark if age, status, or start date matches.';
-    $('statusLabel').textContent = cfg.matchMode === 'and' ? 'Limit to status' : 'Also mark status';
-    $('statusCount').textContent = String(cfg.statuses.length);
-    $('startLabel').textContent = cfg.matchMode === 'and' ? 'Limit to start date' : 'Also mark start date';
-    $('startCount').textContent = String((cfg.startDates || []).length);
     const journeys = getModuleId() === 'journeys';
     if (rangeDraft && rangeDraftModule !== getModuleId()) {
       rangeDraft = null;
@@ -543,10 +411,6 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       : 'hidden';
     const open = settings.uiOpen || {};
     shadow.querySelectorAll<HTMLElement>('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec || '']));
-    $('deleteView').style.visibility = (cfg.presets || []).some((p) => p.id === cfg.activePreset) ? 'visible' : 'hidden';
-    shadow.querySelectorAll<HTMLElement>('.swatch').forEach((sw) => {
-      sw.classList.toggle('on', (sw.dataset.color || '').toLowerCase() === cfg.color.toLowerCase());
-    });
     const overlay = reportOpen || settingsOpen || resultsOpen;
     panel.classList.toggle('hide', settings.collapsed || overlay);
     fab.classList.toggle('show', settings.collapsed && !overlay);
@@ -554,11 +418,9 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     settingsPanel.classList.toggle('hide', !settingsOpen || settings.collapsed);
     resultsPanel.classList.toggle('show', resultsOpen && !settings.collapsed);
     resultsPanel.classList.toggle('hide', !resultsOpen || settings.collapsed);
-    renderViewPresets();
-    renderStatusTags();
-    renderStartTags();
-    renderExtraFilters();
+    renderFilterChips();
     renderSortKeys();
+    if (settingsOpen) manage.sync();
     applyFeatureVisibility(shadow, ctx);
     syncRegisteredFeatures($('featureMount'), ctx);
     applyPageStyles();
@@ -577,6 +439,10 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     syncUI();
     markTickets();
   }
+
+  const manage = initManage(shadow, {
+    onChange: (filters) => applyFilters(filters),
+  });
 
   function makeDraggable(handle: HTMLElement): void {
     handle.addEventListener('pointerdown', (e) => {
@@ -631,14 +497,10 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     updateRoot({ uiOpen: open });
   });
 
-  const statusInput = $('statusInput') as HTMLInputElement;
-  const startInput = $('startInput') as HTMLInputElement;
   const apiKeyInput = $('apiKeyInput') as HTMLInputElement;
   const rangeFromInput = $('rangeFrom') as HTMLInputElement;
   const rangeToInput = $('rangeTo') as HTMLInputElement;
   (['keydown', 'keypress', 'keyup'] as const).forEach((type) => {
-    statusInput.addEventListener(type, (e) => e.stopPropagation());
-    startInput.addEventListener(type, (e) => e.stopPropagation());
     apiKeyInput.addEventListener(type, (e) => e.stopPropagation());
     rangeFromInput.addEventListener(type, (e) => e.stopPropagation());
     rangeToInput.addEventListener(type, (e) => e.stopPropagation());
@@ -669,62 +531,26 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     resultsOpen = false;
     syncUI();
   });
-  startInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const raw = startInput.value;
-      startInput.value = '';
-      addStartDate(raw);
-    }
-  });
-  statusInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const name = statusInput.value.replace(/\s+/g, ' ').trim();
-      statusInput.value = '';
-      if (!name) return;
-      if (page().statuses.some((s) => s.toLowerCase() === name.toLowerCase())) return;
-      updatePage({ statuses: [...page().statuses, name], activePreset: null });
-    }
-  });
   $('enabled').addEventListener('click', () => updatePage({ enabled: !page().enabled }));
-  $('days').addEventListener('input', (e) => updatePage({ days: Number((e.target as HTMLInputElement).value), activePreset: null }));
-  shadow.querySelectorAll('#matchMode button').forEach((btn) => {
-    btn.addEventListener('click', () => updatePage({ matchMode: ((btn as HTMLElement).dataset.mode || 'or') as MatchMode, activePreset: null }));
-  });
   shadow.querySelectorAll('#moduleSeg button').forEach((btn) => {
     btn.addEventListener('click', () => updateRoot({ module: ((btn as HTMLElement).dataset.module || 'auto') as ModuleSetting }));
   });
   shadow.querySelectorAll('#sortDir button').forEach((btn) => {
     btn.addEventListener('click', () => updatePage({ sortDir: ((btn as HTMLElement).dataset.dir || 'asc') as SortDir }));
   });
-  $('saveView').addEventListener('click', () => {
-    const name = window.prompt('Name this view', `${getModuleId()} ${page().days}d`);
-    if (!name) return;
-    const preset: Preset = {
-      id: `p-${Date.now()}`,
-      name: name.replace(/\s+/g, ' ').trim().slice(0, 32),
-      days: page().days,
-      statuses: [...page().statuses],
-      matchMode: page().matchMode,
-      maxProgress: page().maxProgress,
-      startWithin: page().startWithin,
-      startDates: [...(page().startDates || [])],
-      startFrom: page().startFrom,
-      startTo: page().startTo,
-    };
-    updatePage({ presets: [...page().presets, preset], activePreset: preset.id });
-  });
-  $('deleteView').addEventListener('click', () => {
-    const id = page().activePreset;
-    if (!(page().presets || []).some((p) => p.id === id)) return;
-    if (!confirm('Delete this saved view?')) return;
-    updatePage({ presets: page().presets.filter((p) => p.id !== id), activePreset: null });
-  });
-  shadow.querySelectorAll<HTMLElement>('.swatch').forEach((sw) => {
-    sw.addEventListener('click', () => updatePage({ color: sw.dataset.color || page().color }));
-  });
-  $('customColor').addEventListener('input', (e) => updatePage({ color: (e.target as HTMLInputElement).value }));
+  const openManage = (tab: 'filters' | 'settings'): void => {
+    settingsOpen = true;
+    reportOpen = false;
+    resultsOpen = false;
+    manage.setTab(tab);
+    if (getSettings().collapsed) updateRoot({ collapsed: false });
+    else syncUI();
+    if (tab === 'settings') {
+      void refreshApiKeyStatus();
+      void about.refresh();
+    }
+  };
+  $('openManage').addEventListener('click', () => openManage('filters'));
   $('collapse').addEventListener('click', (e) => {
     e.stopPropagation();
     updateRoot({ collapsed: true });
@@ -752,13 +578,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   });
   $('openSettings').addEventListener('click', (e) => {
     e.stopPropagation();
-    settingsOpen = true;
-    reportOpen = false;
-    resultsOpen = false;
-    if (getSettings().collapsed) updateRoot({ collapsed: false });
-    else syncUI();
-    void refreshApiKeyStatus();
-    void about.refresh();
+    openManage('settings');
   });
   $('closeSettings').addEventListener('click', (e) => {
     e.stopPropagation();

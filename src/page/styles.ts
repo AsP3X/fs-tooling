@@ -2,8 +2,8 @@
 // Agent: WRITES #sth-page-style. Color comes from the active module's settings.
 
 import { CELL_MARK, ROW_MARK, STYLE_ID } from '../lib/constants';
-import { page } from '../lib/state';
-import { hexToRgba } from '../lib/text';
+import { accentColor } from '../lib/filters';
+import { getModuleId, page } from '../lib/state';
 
 export function pageStyleElement(): HTMLStyleElement | null {
   return document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -12,16 +12,16 @@ export function pageStyleElement(): HTMLStyleElement | null {
 export function applyPageStyles(): void {
   const el = pageStyleElement();
   if (!el) return;
-  const c = page().color;
+  const c = accentColor(page(), getModuleId());
   const css = `
       .${ROW_MARK} {
-        background-color: ${hexToRgba(c, 0.18)} !important;
-        box-shadow: inset 4px 0 0 ${c} !important;
+        background-color: color-mix(in srgb, var(--sth-mark, ${c}) 18%, transparent) !important;
+        box-shadow: inset 4px 0 0 var(--sth-mark, ${c}) !important;
       }
-      .${ROW_MARK} > td { background-color: ${hexToRgba(c, 0.18)} !important; }
+      .${ROW_MARK} > td { background-color: color-mix(in srgb, var(--sth-mark, ${c}) 18%, transparent) !important; }
       .${CELL_MARK} {
-        background-color: ${hexToRgba(c, 0.35)} !important;
-        outline: 2px solid ${c} !important;
+        background-color: color-mix(in srgb, var(--sth-mark, ${c}) 35%, transparent) !important;
+        outline: 2px solid var(--sth-mark, ${c}) !important;
         border-radius: 3px;
       }
       th[data-sth-col="start"], td[data-sth-col="start"] {

@@ -139,7 +139,10 @@ async function offPageTickets(
   sampleHref: string | null,
   force: boolean,
 ): Promise<{ urls: string[]; records: Reportable[]; truncated: boolean }> {
-  const key = JSON.stringify({ d: cfg.days, s: cfg.statuses, m: cfg.matchMode });
+  const key = JSON.stringify({
+    d: cfg.days, s: cfg.statuses, m: cfg.matchMode,
+    f: (cfg.filters || []).map((r) => [r.id, r.enabled, r.matchMode, r.criteria]),
+  });
   let tickets: ApiTicket[];
   if (filterCache && filterCache.key === key && cacheOk(filterCache.at, force)) {
     tickets = filterCache.tickets;
@@ -176,7 +179,7 @@ async function offPageJourneys(
     if (visibleIds.has(j.id) || (j.display_id != null && visibleIds.has(j.display_id))) return [];
     const url = journeyHrefFor(origin, j.display_id || j.id, sampleHref);
     const rec = journeyToReportable(j, now, { pct: null, done: null, total: null }, url);
-    return itemMatches(rec, cfg) ? [{ rec, url }] : [];
+    return itemMatches(rec, cfg, getModuleId()) ? [{ rec, url }] : [];
   });
   return {
     urls: matched.map((m) => m.url),
