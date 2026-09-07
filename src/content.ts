@@ -1,7 +1,7 @@
 // Human: Content-script entry. Mounts the shadow panel on Freshservice / Freshworks list pages.
 // Agent: WRITES #sth-host and #sth-page-style; observer ignores our start-column writes so paint cannot loop.
 
-import { HOST_ID, STYLE_ID } from './lib/constants';
+import { HOST_DEFAULT_INSET_PX, HOST_ID, STYLE_ID } from './lib/constants';
 import { shouldIgnoreMutations } from './page/mutations';
 import { markTickets } from './page/paint';
 import { runtime } from './page/runtime';
@@ -18,7 +18,7 @@ document.head.appendChild(pageStyle);
 
 const host = document.createElement('div');
 host.id = HOST_ID;
-host.style.cssText = 'all:initial;position:fixed;z-index:2147483647;bottom:20px;right:20px;top:auto;left:auto;touch-action:none;';
+host.style.cssText = `all:initial;position:fixed;z-index:2147483647;bottom:${HOST_DEFAULT_INSET_PX}px;left:${HOST_DEFAULT_INSET_PX}px;top:auto;right:auto;touch-action:none;`;
 document.documentElement.appendChild(host);
 const shadow = host.attachShadow({ mode: 'open' });
 

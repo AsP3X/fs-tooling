@@ -35,7 +35,7 @@ Load unpacked from `dist/sth-extension/`. Full loop: [Local development](docs/lo
 - Sort the visible list by Created On, Initiator, Request Status, or child progress
 - Statistics snapshots do **not** store person names
 
-Current version: **2.7.2** (`package.json`).
+Current version: **2.7.3** (`package.json`).
 
 ---
 

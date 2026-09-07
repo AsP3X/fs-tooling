@@ -6,6 +6,8 @@ import type { PageSettings, Preset, Settings } from './types';
 export const NS = 'sth';
 export const HOST_ID = `${NS}-host`;
 export const STYLE_ID = `${NS}-page-style`;
+/** Default dock for both the expanded panel and the collapsed chip when no saved x/y or fabX/fabY. */
+export const HOST_DEFAULT_INSET_PX = 20;
 export const ROW_MARK = `${NS}-row`;
 export const CELL_MARK = `${NS}-cell`;
 export const STORAGE_KEY = `${NS}-settings-v2`;

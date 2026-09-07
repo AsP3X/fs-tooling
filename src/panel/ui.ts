@@ -3,7 +3,7 @@
 
 import { listRangeResults } from '../lib/api/enrich';
 import { contextLabel, detectContext } from '../lib/context';
-import { HISTORY_KEY, JOURNEY_PRESETS, TICKET_PRESETS } from '../lib/constants';
+import { HISTORY_KEY, HOST_DEFAULT_INSET_PX, JOURNEY_PRESETS, TICKET_PRESETS } from '../lib/constants';
 import { formatStart, parseStartInput } from '../lib/dates';
 import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
@@ -237,9 +237,9 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   }
   function placeDefault(): void {
     host.style.top = 'auto';
-    host.style.left = 'auto';
-    host.style.right = '20px';
-    host.style.bottom = '20px';
+    host.style.right = 'auto';
+    host.style.left = `${HOST_DEFAULT_INSET_PX}px`;
+    host.style.bottom = `${HOST_DEFAULT_INSET_PX}px`;
   }
   function placeAt(x: number, y: number): { x: number; y: number } {
     const p = clampPos(x, y);
@@ -249,8 +249,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     host.style.bottom = 'auto';
     return p;
   }
-  // Human: Collapsed uses fabX/fabY; expanded uses x/y. Unset dock → default bottom-right.
-  // Agent: READS settings.collapsed + dock coords. WRITES host left/top, or bottom/right when that dock is unset.
+  // Human: Collapsed uses fabX/fabY; expanded uses x/y. Unset dock → default lower-left.
+  // Agent: READS settings.collapsed + dock coords. WRITES host left/top, or left/bottom when that dock is unset.
   function applySavedPosition(): void {
     const settings = getSettings();
     const dock = settings.collapsed
