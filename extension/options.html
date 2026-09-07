@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ops panel · Desk URL</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      background: #12141a;
+      color: #e8eaed;
+    }
+    main {
+      width: min(440px, calc(100% - 32px));
+      margin: 48px auto;
+      padding: 18px 16px 16px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(28,32,38,.92), rgba(18,20,24,.94));
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    h1 { margin: 0; font-size: 16px; font-weight: 650; }
+    .sub { margin: 6px 0 16px; font-size: 12px; color: #9aa3ad; line-height: 1.45; }
+    .label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b949e; margin-bottom: 8px; }
+    .hint { margin: 8px 0 0; font-size: 11px; color: #8b949e; line-height: 1.4; }
+    .hint.err { color: #ef9a9a; }
+    .hint.ok { color: #a5d6a7; }
+    input[type="url"], input[type="text"] {
+      width: 100%;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.05);
+      color: #f2f4f7;
+      padding: 0 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+    button {
+      height: 34px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .primary { border: 0; color: #fff; background: #1565c0; padding: 0 14px; }
+    .ghost {
+      border: 1px solid rgba(255,255,255,.08);
+      background: transparent;
+      color: #c5cbd3;
+      padding: 0 10px;
+    }
+    .desk {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      font-size: 13px;
+    }
+    .desk code { font-size: 12px; color: #e8eaed; }
+    #deskList:empty::before {
+      content: "None yet. SaaS *.freshservice.com needs no entry.";
+      display: block;
+      font-size: 11px;
+      color: #8b949e;
+      padding: 4px 0 8px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Desk URL</h1>
+    <p class="sub">Chrome only injects the panel on *.freshservice.com until you add your custom Freshservice address. Paste the desk you open in the browser — no tenant is built in.</p>
+    <span class="label">Custom Freshservice URL</span>
+    <div class="row">
+      <input id="deskInput" type="url" placeholder="https://desk.example.com" spellcheck="false" />
+      <button class="primary" id="addDesk" type="button">Add</button>
+    </div>
+    <p class="hint" id="deskStatus">Saved for this browser only. Chrome will ask to allow the site.</p>
+    <span class="label" style="margin-top:18px">Saved desks</span>
+    <div id="deskList"></div>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

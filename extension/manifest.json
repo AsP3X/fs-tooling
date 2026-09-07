@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Freshservice Ops Panel",
-  "version": "2.8.3",
+  "version": "2.8.4",
   "description": "Compact ops panel for Freshservice tickets and onboarding journeys.",
   "icons": {
     "16": "icon16.png",
@@ -9,15 +9,18 @@
     "48": "icon48.png",
     "128": "icon128.png"
   },
+  "permissions": ["storage", "scripting", "activeTab"],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "action": {
-    "default_title": "Ops panel",
+    "default_title": "Ops panel — click to show on this Freshservice tab",
     "default_icon": {
       "16": "icon16.png",
       "32": "icon32.png",
       "48": "icon48.png"
     }
   },
-  "permissions": ["storage"],
   "host_permissions": [
     "https://*.freshservice.com/*",
     "https://*.myfreshworks.com/*",
@@ -25,6 +28,10 @@
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "content_scripts": [
     {

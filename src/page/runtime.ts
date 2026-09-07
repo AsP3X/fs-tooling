@@ -4,4 +4,6 @@
 export const runtime = {
   renderStats: (): void => {},
   onPageChange: (): void => {},
+  /** Toolbar click: uncollapse and re-clamp so the panel is on-screen. */
+  revealPanel: (): void => {},
 };

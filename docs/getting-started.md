@@ -13,6 +13,8 @@ The Ops Panel is a **Manifest V3 content script** for Chromium browsers. It inje
 5. Click **Load unpacked** and select that folder.
 6. Open `/a/tickets` or an Employee Onboarding / Journeys list.
 
+**Custom Freshservice domain:** Chrome will not inject the panel on a CNAME desk until you add that URL. On first install the **Desk URL** settings page opens. Paste the address you use in the browser (no tenant is built in), allow the site when Chrome asks, then refresh the desk. You can open the same page later from **Settings → Configure desk URL**, or by clicking the toolbar icon on a non-Freshservice tab.
+
 After you edit source and rebuild, click **Reload** on the extension card, then refresh Freshservice.
 
 ## Tampermonkey / injectable script

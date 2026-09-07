@@ -9,6 +9,7 @@ This folder is the **Manifest V3 shell** (`manifest.json`). The loadable package
 3. Turn on **Developer mode**.
 4. Click **Load unpacked** and select `dist/sth-extension`.
 5. Open a Freshservice `/a/tickets` list or an Employee Onboarding / Journeys list.
+6. On first install, the **Desk URL** page opens. SaaS `*.freshservice.com` needs nothing extra. For a custom desk, paste that URL and allow the site.
 
 After you change source, rebuild (watch does this automatically), click **Reload** on the extension card, then refresh Freshservice.
 

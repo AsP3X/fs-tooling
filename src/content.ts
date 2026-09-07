@@ -2,6 +2,7 @@
 // Agent: WRITES #sth-host and #sth-page-style; observer ignores our start-column writes so paint cannot loop.
 
 import { HOST_DEFAULT_INSET_PX, HOST_ID, STYLE_ID } from './lib/constants';
+import { hasExtensionRuntime } from './lib/secrets';
 import { shouldIgnoreMutations } from './page/mutations';
 import { markTickets } from './page/paint';
 import { runtime } from './page/runtime';
@@ -24,6 +25,15 @@ const shadow = host.attachShadow({ mode: 'open' });
 
 initPanel(host, shadow);
 markTickets();
+
+if (hasExtensionRuntime()) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== 'sth.panel.reveal') return undefined;
+    runtime.revealPanel();
+    sendResponse({ ok: true });
+    return true;
+  });
+}
 
 let timer: ReturnType<typeof setTimeout>;
 window.__staleTicketObserver = new MutationObserver((muts) => {

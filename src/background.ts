@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
-// Human: MV3 service worker. API key, Freshservice /api/v2 proxy, and GitHub Releases update check.
-// Agent: READS/WRITES chrome.storage.local sth.apiKey, sth.updates.cache, sth.updates.dismissed. sth.api.fetch validates HTTPS Freshservice origin and /api/v2 path. sth.updates.check FETCH only the public latest-release URL.
+// Human: MV3 service worker. API key, custom desk URLs, Freshservice /api/v2 proxy, and GitHub Releases update check.
+// Agent: READS/WRITES chrome.storage.local sth.apiKey, sth.desks, sth.updates.cache, sth.updates.dismissed. Custom desks are user-entered origins (no tenant hardcoded). sth.api.fetch allows default SaaS hosts or sth.desks. sth.updates.check FETCH only the public latest-release URL.
 
 const STORAGE_KEY = 'sth.apiKey';
+const DESKS_KEY = 'sth.desks';
 const UPDATE_CACHE_KEY = 'sth.updates.cache';
 const UPDATE_DISMISSED_KEY = 'sth.updates.dismissed';
 // Keep in sync with GITHUB_RELEASES_API / UPDATE_CHECK_MAX_AGE_MS / UPDATE_RETRY_MS in src/lib/updates.ts.
@@ -11,11 +12,81 @@ const GITHUB_RELEASES_LATEST = 'https://api.github.com/repos/AsP3X/fs-tooling/re
 const UPDATE_MAX_AGE_MS = 86400000;
 const UPDATE_RETRY_MS = 15 * 60 * 1000;
 
-function allowedOrigin(origin) {
+const CUSTOM_SCRIPT_ID = 'sth-custom-hosts';
+
+// Keep in sync with src/lib/hosts.ts (this file is copied to background.js, not bundled).
+function isDefaultAddonHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'freshservice.com' || h.endsWith('.freshservice.com')
+    || h === 'myfreshworks.com' || h.endsWith('.myfreshworks.com');
+}
+
+function originMatchPattern(origin) {
   try {
     const u = new URL(origin);
-    return u.protocol === 'https:'
-      && (u.hostname.endsWith('.freshservice.com') || u.hostname.endsWith('.myfreshworks.com'));
+    if (u.protocol !== 'https:') return '';
+    return `${u.origin}/*`;
+  } catch {
+    return '';
+  }
+}
+
+function looksLikeFreshserviceUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    if (isDefaultAddonHost(u.hostname)) return true;
+    const path = u.pathname || '/';
+    return path.startsWith('/a/') || path.startsWith('/helpdesk') || path.startsWith('/support/');
+  } catch {
+    return false;
+  }
+}
+
+function parseDeskOrigin(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  try {
+    const withProto = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+    const u = new URL(withProto);
+    if (u.protocol !== 'https:') return null;
+    const host = u.hostname.toLowerCase();
+    if (!host || host === 'localhost') return null;
+    if (host === 'github.com' || host.endsWith('.github.com') || host === 'api.github.com') return null;
+    const origin = `https://${host}${u.port && u.port !== '443' ? `:${u.port}` : ''}`;
+    return { origin, builtin: isDefaultAddonHost(host) };
+  } catch {
+    return null;
+  }
+}
+
+async function readDesks() {
+  const stored = await chrome.storage.local.get(DESKS_KEY);
+  const raw = stored[DESKS_KEY];
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  list.forEach((item) => {
+    const parsed = parseDeskOrigin(String(item || ''));
+    if (!parsed || parsed.builtin || seen.has(parsed.origin)) return;
+    seen.add(parsed.origin);
+    out.push(parsed.origin);
+  });
+  return out;
+}
+
+async function writeDesks(origins) {
+  await chrome.storage.local.set({ [DESKS_KEY]: origins });
+  await syncCustomContentScripts();
+}
+
+async function allowedOrigin(origin) {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'https:') return false;
+    if (isDefaultAddonHost(u.hostname)) return true;
+    const desks = await readDesks();
+    return desks.includes(u.origin);
   } catch {
     return false;
   }
@@ -28,7 +99,7 @@ function allowedPath(path) {
 async function handleApiFetch(message) {
   const origin = String(message.origin || '');
   const path = String(message.path || '');
-  if (!allowedOrigin(origin) || !allowedPath(path)) {
+  if (!(await allowedOrigin(origin)) || !allowedPath(path)) {
     return { ok: false, status: 0, json: null, error: 'forbidden' };
   }
   const stored = await chrome.storage.local.get(STORAGE_KEY);
@@ -261,5 +332,124 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     reply(sendResponse, handleUpdatesDismiss(message));
     return true;
   }
+  if (type === 'sth.desks.parse') {
+    const parsed = parseDeskOrigin(message?.raw);
+    sendResponse(parsed ? { ok: true, ...parsed } : { ok: false, error: 'bad_url' });
+    return true;
+  }
+  if (type === 'sth.desks.list') {
+    readDesks().then((desks) => sendResponse({ ok: true, desks: desks.map((origin) => ({ origin })) }));
+    return true;
+  }
+  if (type === 'sth.desks.add') {
+    reply(sendResponse, (async () => {
+      const parsed = parseDeskOrigin(message?.origin);
+      if (!parsed || parsed.builtin) return { ok: false, error: 'bad_url' };
+      const desks = await readDesks();
+      if (!desks.includes(parsed.origin)) desks.push(parsed.origin);
+      await writeDesks(desks);
+      return { ok: true, origin: parsed.origin };
+    })());
+    return true;
+  }
+  if (type === 'sth.desks.remove') {
+    reply(sendResponse, (async () => {
+      const parsed = parseDeskOrigin(message?.origin);
+      const origin = parsed?.origin || '';
+      const desks = (await readDesks()).filter((item) => item !== origin);
+      await writeDesks(desks);
+      const pattern = originMatchPattern(origin);
+      if (pattern && chrome.permissions?.remove) {
+        try { await chrome.permissions.remove({ origins: [pattern] }); } catch { /* ignore */ }
+      }
+      return { ok: true };
+    })());
+    return true;
+  }
+  if (type === 'sth.desks.open') {
+    try {
+      chrome.runtime.openOptionsPage();
+      sendResponse({ ok: true });
+    } catch {
+      sendResponse({ ok: false });
+    }
+    return true;
+  }
   return undefined;
+});
+
+async function syncCustomContentScripts() {
+  if (!chrome.scripting?.registerContentScripts) return;
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [CUSTOM_SCRIPT_ID] });
+  } catch {
+    /* not registered yet */
+  }
+  const extra = (await readDesks()).map(originMatchPattern).filter(Boolean);
+  if (!extra.length) return;
+  await chrome.scripting.registerContentScripts([{
+    id: CUSTOM_SCRIPT_ID,
+    matches: extra,
+    js: ['content.js'],
+    runAt: 'document_idle',
+    persistAcrossSessions: true,
+    allFrames: false,
+  }]);
+}
+
+async function revealOrInject(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'sth.panel.reveal' });
+    return;
+  } catch {
+    /* no content script yet */
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  } catch {
+    /* no host access */
+  }
+}
+
+chrome.action?.onClicked?.addListener(async (tab) => {
+  const tabId = tab?.id;
+  const url = String(tab?.url || '');
+  if (!tabId || !looksLikeFreshserviceUrl(url)) {
+    try { chrome.runtime.openOptionsPage(); } catch { /* ignore */ }
+    return;
+  }
+  const parsed = new URL(url);
+  if (!isDefaultAddonHost(parsed.hostname)) {
+    const pattern = originMatchPattern(parsed.origin);
+    if (pattern && chrome.permissions?.request) {
+      try {
+        const ok = await chrome.permissions.request({ origins: [pattern] });
+        if (ok) {
+          const desks = await readDesks();
+          if (!desks.includes(parsed.origin)) {
+            desks.push(parsed.origin);
+            await writeDesks(desks);
+          } else {
+            await syncCustomContentScripts();
+          }
+        }
+      } catch {
+        /* user closed the prompt */
+      }
+    }
+  }
+  await revealOrInject(tabId);
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  void syncCustomContentScripts();
+  if (details?.reason === 'install') {
+    try { chrome.runtime.openOptionsPage(); } catch { /* ignore */ }
+  }
+});
+chrome.runtime.onStartup?.addListener(() => {
+  void syncCustomContentScripts();
+});
+chrome.permissions?.onAdded?.addListener(() => {
+  void syncCustomContentScripts();
 });

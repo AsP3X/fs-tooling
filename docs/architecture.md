@@ -2,7 +2,9 @@
 
 ← [Back to main README](../README.md) · [Documentation index](./README.md)
 
-The product is a Manifest V3 **content script** plus a small **service worker** (API key storage and GitHub update check). Chrome and Edge load the same package.
+The product is a Manifest V3 **content script** plus a small **service worker** (API key storage, GitHub update check, and custom-domain inject). Chrome and Edge load the same package.
+
+Declared content scripts match `*.freshservice.com` and `*.myfreshworks.com`. A **custom CNAME desk** does not match those patterns. The user adds that origin on the extension **Desk URL** options page (`sth.desks` in `chrome.storage.local`). First install opens that page. Optional host permission is requested for each saved origin; the worker then registers `content.js` for those matches and allows `/api/v2` proxy only to default SaaS hosts or saved desks. No tenant hostname is hardcoded.
 
 ```
 src/
@@ -48,6 +50,7 @@ A from–to **date range** (`startFrom` / `startTo`) is a separate overlay, not 
 | `sth-settings-v2` | Page `localStorage` | Module, expanded panel `x`/`y`, collapsed FAB `fabX`/`fabY`, per-page filters/views |
 | `sth-history-v2` | Page `localStorage` | Rolling statistics snapshots (counts/averages only) |
 | `sth.apiKey` | Extension `chrome.storage.local` (service worker) | Freshservice API key. Never written to page storage. |
+| `sth.desks` | Extension `chrome.storage.local` (service worker) | User-configured custom desk origins (`https://host`). Empty on SaaS-only installs. |
 | `sth.updates.cache` | Extension `chrome.storage.local` (service worker) | Last GitHub `/releases/latest` snapshot + ETag, max-age 24h |
 | `sth.updates.dismissed` | Extension `chrome.storage.local` (service worker) | Addon version the user dismissed (e.g. `2.8.0`). Toast stays hidden until a newer version. |
 

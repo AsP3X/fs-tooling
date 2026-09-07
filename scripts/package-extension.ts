@@ -70,6 +70,8 @@ export function packageExtension(): void {
   manifest.version = pkg.version;
   writeFileSync(join(unpacked, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   copyFileSync(join(root, 'extension/README.md'), join(unpacked, 'README.md'));
+  copyFileSync(join(root, 'extension/options.html'), join(unpacked, 'options.html'));
+  copyFileSync(join(root, 'extension/options.js'), join(unpacked, 'options.js'));
   for (const size of [16, 32, 48, 128]) {
     writeFileSync(join(unpacked, `icon${size}.png`), pngIcon(size));
   }

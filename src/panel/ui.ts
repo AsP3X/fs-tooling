@@ -11,7 +11,7 @@ import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
 import { savedPoint } from '../lib/settings';
 import { collectRows } from '../lib/rows';
-import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
+import { clearApiKey, getApiKey, hasExtensionRuntime, maskApiKey, setApiKey } from '../lib/secrets';
 import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
 import { buildReport } from '../lib/stats';
 import { escapeHtml, fmtDur } from '../lib/text';
@@ -302,6 +302,14 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   }
   runtime.renderStats = renderStats;
   runtime.onPageChange = () => { syncUI(); };
+  runtime.revealPanel = () => {
+    reportOpen = false;
+    settingsOpen = false;
+    resultsOpen = false;
+    filterOpen = false;
+    updateRoot({ collapsed: false });
+    requestAnimationFrame(() => applySavedPosition());
+  };
 
   async function refreshApiKeyStatus(): Promise<void> {
     const key = await getApiKey();
@@ -615,6 +623,11 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     e.stopPropagation();
     reportOpen = false;
     syncUI();
+  });
+  const deskBtn = $('openDeskSettings');
+  if (!hasExtensionRuntime()) deskBtn.closest('.card')?.setAttribute('hidden', '');
+  deskBtn.addEventListener('click', () => {
+    void chrome.runtime.sendMessage({ type: 'sth.desks.open' });
   });
   $('openSettings').addEventListener('click', (e) => {
     e.stopPropagation();

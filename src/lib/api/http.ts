@@ -1,6 +1,7 @@
 // Human: Tenant-scoped Freshservice /api/v2 client. Extension traffic goes through the service worker.
-// Agent: WRITES nothing locally. Rejects non-HTTPS / non-Freshservice origins. Userscripts fetch same-origin with the session key.
+// Agent: WRITES nothing locally. Rejects non-HTTPS / non-default SaaS origins here; the worker also allows a user-granted custom desk. Userscripts fetch same-origin with the session key.
 
+import { isDefaultAddonHost } from '../hosts';
 import { getApiKey, hasExtensionRuntime } from '../secrets';
 
 export interface ApiResponse {
@@ -13,8 +14,7 @@ export interface ApiResponse {
 export function isAllowedOrigin(origin: string): boolean {
   try {
     const u = new URL(origin);
-    return u.protocol === 'https:'
-      && (u.hostname.endsWith('.freshservice.com') || u.hostname.endsWith('.myfreshworks.com'));
+    return u.protocol === 'https:' && isDefaultAddonHost(u.hostname);
   } catch {
     return false;
   }
