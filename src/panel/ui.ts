@@ -1,4 +1,4 @@
-// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, GitHub update toast, drag position.
+// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, settings (API key + About), GitHub update toast, drag position.
 // Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on highlight-filter changes. Range overlay CALLS listRangeResults and does not mutate the host table.
 
 import { listRangeResults } from '../lib/api/enrich';
@@ -19,6 +19,7 @@ import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
 import { syncStartColumnHeader } from '../page/start-column';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
+import { initAbout } from './about';
 import { initUpdateToast } from './update-toast';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
@@ -36,6 +37,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const report = $('report');
   const settingsPanel = $('settingsPanel');
   const resultsPanel = $('resultsPanel');
+  const about = initAbout(shadow);
   let reportOpen = false;
   let settingsOpen = false;
   let resultsOpen = false;
@@ -275,7 +277,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const key = await getApiKey();
     const present = !!key.trim();
     $('apiKeyStatus').textContent = present ? `Saved · ${maskApiKey(key)}` : 'No key saved';
-    $('settingsSub').textContent = present ? 'API key saved' : 'API access';
+    $('settingsSub').textContent = present ? 'API key saved · About' : 'API key · About';
     setApiKeyPresent(present);
     if (!present && resultsOpen) {
       resultsOpen = false;
@@ -750,6 +752,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
     void refreshApiKeyStatus();
+    void about.refresh();
   });
   $('closeSettings').addEventListener('click', (e) => {
     e.stopPropagation();

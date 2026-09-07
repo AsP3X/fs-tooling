@@ -6,8 +6,10 @@ import {
   compareAddonVersions,
   dismissUpdate,
   fetchLatestRelease,
+  installedAddonVersion,
   isCacheFresh,
   isGithubReleaseUrl,
+  isUpdateAvailable,
   parseAddonVersion,
   parseGithubRelease,
   shouldShowUpdateNotice,
@@ -76,6 +78,14 @@ describe('shouldShowUpdateNotice', () => {
   });
 });
 
+describe('isUpdateAvailable', () => {
+  it('is true when GitHub is ahead, even if that version was dismissed', () => {
+    expect(isUpdateAvailable('2.7.0', '2.8.0')).toBe(true);
+    expect(isUpdateAvailable('2.7.0', 'v2.7.0-85')).toBe(false);
+    expect(isUpdateAvailable('2.8.0', '2.8.0')).toBe(false);
+  });
+});
+
 describe('parseGithubRelease', () => {
   it('reads the GitHub REST latest-release payload', () => {
     const release = parseGithubRelease({
@@ -138,11 +148,22 @@ describe('isGithubReleaseUrl', () => {
 });
 
 describe('extension messaging without a runtime', () => {
-  it('returns an empty check and does not throw on dismiss', async () => {
+  it('returns the stamped version and does not throw on dismiss', async () => {
+    const current = installedAddonVersion();
+    expect(current).toMatch(/^\d+\.\d+\.\d+/);
     await expect(fetchLatestRelease()).resolves.toEqual({
-      currentVersion: '',
+      currentVersion: current,
       dismissed: null,
       release: null,
+      ok: false,
+      error: 'no_runtime',
+    });
+    await expect(fetchLatestRelease({ force: true })).resolves.toEqual({
+      currentVersion: current,
+      dismissed: null,
+      release: null,
+      ok: false,
+      error: 'no_runtime',
     });
     await expect(dismissUpdate('2.8.0')).resolves.toBeUndefined();
   });

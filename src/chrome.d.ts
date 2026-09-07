@@ -18,6 +18,7 @@ declare global {
               method?: string;
               body?: string;
               version?: string;
+              force?: boolean;
             },
             sender: unknown,
             sendResponse: (response: unknown) => void,

@@ -3,7 +3,10 @@
 
 import { hasExtensionRuntime } from './secrets';
 
+declare const __STH_VERSION__: string;
+
 export const GITHUB_REPO = 'AsP3X/fs-tooling';
+export const ADDON_PUBLISHER = 'AsP3X';
 export const GITHUB_RELEASES_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 export const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 /** Re-fetch at most once a day. GitHub's unauthenticated cap is 60 requests/hour/IP. */
@@ -26,6 +29,8 @@ export interface UpdateCheckResult {
   currentVersion: string;
   dismissed: string | null;
   release: AddonRelease | null;
+  ok: boolean;
+  error?: string;
 }
 
 const VERSION_PREFIX = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?/;
@@ -116,29 +121,50 @@ export function parseGithubRelease(json: unknown): AddonRelease | null {
   };
 }
 
+/** True when GitHub is a newer addon version than the install. Ignores toast dismiss state. */
+export function isUpdateAvailable(current: string, latest: string | null | undefined): boolean {
+  const installed = parseAddonVersion(current);
+  const remote = parseAddonVersion(latest);
+  if (!installed || !remote) return false;
+  return compareAddonVersions(remote, installed) > 0;
+}
+
 export function shouldShowUpdateNotice(input: {
   current: string;
   latest: string | null;
   dismissed: string | null;
 }): boolean {
-  const current = parseAddonVersion(input.current);
+  if (!isUpdateAvailable(input.current, input.latest)) return false;
   const latest = parseAddonVersion(input.latest);
   const dismissed = parseAddonVersion(input.dismissed);
-  if (!current || !latest) return false;
-  if (compareAddonVersions(latest, current) <= 0) return false;
-  if (dismissed && compareAddonVersions(latest, dismissed) <= 0) return false;
+  if (dismissed && latest && compareAddonVersions(latest, dismissed) <= 0) return false;
   return true;
+}
+
+function emptyResult(currentVersion: string, error: string): UpdateCheckResult {
+  return { currentVersion, dismissed: null, release: null, ok: false, error };
 }
 
 function workerResult(raw: unknown): UpdateCheckResult {
   const rec = asRecord(raw);
-  if (!rec) return { currentVersion: '', dismissed: null, release: null };
+  if (!rec) return emptyResult('', 'no_response');
   const dismissed = parseAddonVersion(field(rec, 'dismissed'));
+  const error = field(rec, 'error');
   return {
     currentVersion: parseAddonVersion(field(rec, 'currentVersion')) || '',
     dismissed,
     release: parseGithubRelease(rec.release),
+    ok: rec.ok !== false,
+    error: error || undefined,
   };
+}
+
+function stampedVersion(): string {
+  try {
+    return parseAddonVersion(__STH_VERSION__) || '';
+  } catch {
+    return '';
+  }
 }
 
 function manifestVersion(): string {
@@ -149,17 +175,27 @@ function manifestVersion(): string {
   }
 }
 
-export async function fetchLatestRelease(): Promise<UpdateCheckResult> {
+// Human: Prefer the running manifest; fall back to the version Vite stamped from package.json.
+// Agent: READS chrome.runtime.getManifest().version, then __STH_VERSION__. RETURNS dotted addon version or ''.
+export function installedAddonVersion(): string {
+  return manifestVersion() || stampedVersion();
+}
+
+export async function fetchLatestRelease(opts: { force?: boolean } = {}): Promise<UpdateCheckResult> {
+  const currentVersion = installedAddonVersion();
   if (!hasExtensionRuntime()) {
-    return { currentVersion: '', dismissed: null, release: null };
+    return emptyResult(currentVersion, 'no_runtime');
   }
   try {
-    const raw = await chrome.runtime.sendMessage({ type: 'sth.updates.check' });
+    const raw = await chrome.runtime.sendMessage({
+      type: 'sth.updates.check',
+      force: !!opts.force,
+    });
     const result = workerResult(raw);
-    if (!result.currentVersion) result.currentVersion = manifestVersion();
+    if (!result.currentVersion) result.currentVersion = currentVersion;
     return result;
   } catch {
-    return { currentVersion: manifestVersion(), dismissed: null, release: null };
+    return emptyResult(currentVersion, 'send_failed');
   }
 }
 

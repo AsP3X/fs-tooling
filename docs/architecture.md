@@ -56,7 +56,7 @@ Panel settings keys live on the **host page** origin so a Tampermonkey install a
 
 The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). CI tags look like `v2.7.0-42`; comparison uses the addon version (`2.7.0`) and ignores the build suffix, so a new zip of the same version does not notify.
 
-If that version is newer than `chrome.runtime.getManifest().version` and has not been dismissed, the panel shows a toast. **Dismiss** writes `sth.updates.dismissed` and hides the toast until a higher version is published. The userscript build has no worker and skips the check.
+If that version is newer than `chrome.runtime.getManifest().version` and has not been dismissed, the panel shows a toast. **Dismiss** writes `sth.updates.dismissed` and hides the toast until a higher version is published. **Settings → About** always shows the installed version and publisher, and **Check for updates** forces a GitHub fetch (skips the 24h cache). When a newer release exists, About shows a link to it even if the toast was dismissed. The userscript build has no worker and skips the check.
 
 ## Context-based features
 

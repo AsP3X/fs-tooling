@@ -137,12 +137,13 @@ async function rememberFailedCheck(cache, now) {
 let updatesCheckInFlight = null;
 
 // Human: GitHub REST "Get the latest release". Cache 24h (15m after errors), then revalidate with ETag.
-// Agent: READS/WRITES sth.updates.cache + sth.updates.dismissed. FETCH only GITHUB_RELEASES_LATEST. Coalesces overlapping checks. RETURNS a small snapshot, never the notes body.
-async function runUpdatesCheck() {
+// Agent: READS/WRITES sth.updates.cache + sth.updates.dismissed. FETCH only GITHUB_RELEASES_LATEST. `force` skips max-age (Settings → Check for updates). Coalesces overlapping checks. RETURNS a small snapshot, never the notes body.
+async function runUpdatesCheck(opts) {
+  const force = !!(opts && opts.force);
   const now = Date.now();
   try {
     const { cache, dismissed } = await storedUpdateState();
-    if (cacheIsFresh(cache, now)) {
+    if (!force && cacheIsFresh(cache, now)) {
       return updatePayload(cache?.release || null, dismissed, { fromCache: true });
     }
     const headers = {
@@ -199,12 +200,20 @@ async function runUpdatesCheck() {
   }
 }
 
-function handleUpdatesCheck() {
-  if (updatesCheckInFlight) return updatesCheckInFlight;
-  updatesCheckInFlight = runUpdatesCheck().finally(() => {
-    updatesCheckInFlight = null;
-  });
-  return updatesCheckInFlight;
+function handleUpdatesCheck(message) {
+  const force = !!message?.force;
+  // Track the work promise itself (not promise.finally()), or the lock never clears.
+  const op = updatesCheckInFlight
+    ? (force ? updatesCheckInFlight.then(() => runUpdatesCheck({ force: true })) : updatesCheckInFlight)
+    : runUpdatesCheck({ force });
+  if (op !== updatesCheckInFlight) {
+    const tracked = op;
+    updatesCheckInFlight = tracked;
+    tracked.finally(() => {
+      if (updatesCheckInFlight === tracked) updatesCheckInFlight = null;
+    });
+  }
+  return op;
 }
 
 async function handleUpdatesDismiss(message) {
@@ -245,7 +254,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (type === 'sth.updates.check') {
-    reply(sendResponse, handleUpdatesCheck());
+    reply(sendResponse, handleUpdatesCheck(message));
     return true;
   }
   if (type === 'sth.updates.dismiss') {
