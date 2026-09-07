@@ -241,6 +241,7 @@ function normalizeRule(raw: unknown, fallbackColor: string): FilterRule | null {
     color: asColor(rec.color, fallbackColor),
     matchMode: asMatchMode(rec.matchMode),
     criteria: { ...criteriaRaw },
+    sourceId: typeof rec.sourceId === 'string' && rec.sourceId.trim() ? rec.sourceId.trim() : null,
   };
 }
 
@@ -299,7 +300,7 @@ function defaultIdleId(moduleId: ModuleId): string {
 }
 
 /**
- * Merge code builtins with stored rules. Built-in criteria stay locked; color, enabled, and order are user-owned.
+ * Merge code builtins with stored rules. A custom fork (sourceId) occupies that default's slot.
  * Empty stored lists migrate from presets / the previous live recipe.
  */
 export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterRule[] {
@@ -328,7 +329,9 @@ export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterR
 
   const out: FilterRule[] = [];
   const seen = new Set<string>();
+  const forked = new Set<string>();
   stored.forEach((row) => {
+    if (row.sourceId) forked.add(row.sourceId);
     const builtin = builtins.find((b) => b.id === row.id);
     if (builtin) {
       out.push({
@@ -342,10 +345,34 @@ export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterR
     seen.add(row.id);
   });
   builtins.forEach((b) => {
-    if (seen.has(b.id)) return;
+    if (seen.has(b.id) || forked.has(b.id)) return;
     out.push(b);
   });
   return out;
+}
+
+/** First save of a default creates a custom copy in the same slot. */
+export function forkFromBuiltin(rule: FilterRule): FilterRule {
+  const sourceId = rule.builtin ? rule.id : (rule.sourceId || null);
+  return {
+    ...rule,
+    id: newFilterId(),
+    builtin: false,
+    sourceId,
+    criteria: { ...rule.criteria },
+  };
+}
+
+export function restoreFromSource(rule: FilterRule, moduleId: ModuleId): FilterRule | null {
+  const srcId = rule.sourceId;
+  if (!srcId) return null;
+  const src = builtinFilters(moduleId).find((b) => b.id === srcId);
+  if (!src) return null;
+  return { ...src, enabled: rule.enabled };
+}
+
+export function isForkOfDefault(rule: FilterRule): boolean {
+  return !rule.builtin && !!rule.sourceId;
 }
 
 export function moveFilter(list: FilterRule[], id: string, dir: -1 | 1): FilterRule[] {
@@ -383,6 +410,7 @@ export function duplicateFilter(rule: FilterRule): FilterRule {
     name: `${rule.name} copy`.slice(0, 40),
     builtin: false,
     enabled: true,
+    sourceId: rule.builtin ? rule.id : (rule.sourceId || null),
     criteria: { ...rule.criteria },
   };
 }

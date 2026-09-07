@@ -1,8 +1,8 @@
-// Human: Manage dialog — ordered colored filters plus Settings. Criterion editors follow the registered catalog for the current module.
-// Agent: READS page().filters. CALLS onChange with a new filters array. Builtins lock name/criteria; color, enabled, and order stay editable.
+// Human: Side filter dialog — ordered colored rules. Saving a default forks a restorable custom copy.
+// Agent: READS page().filters. CALLS onChange with a new filters array. CALLS onLayout after editor size changes.
 
 import { formatStart, parseStartInput } from '../lib/dates';
-import { blankFilter, criteriaFor, duplicateFilter, moveFilter } from '../lib/filters';
+import { blankFilter, criteriaFor, forkFromBuiltin, isForkOfDefault, moveFilter, restoreFromSource } from '../lib/filters';
 import { collectRows } from '../lib/rows';
 import { getModuleId, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
@@ -12,48 +12,37 @@ const SWATCHES = ['#e65100', '#c62828', '#6a1b9a', '#1565c0', '#2e7d32'];
 
 export function initManage(
   shadow: ShadowRoot,
-  hooks: { onChange: (filters: FilterRule[]) => void },
-): { sync: () => void; setTab: (tab: 'filters' | 'settings') => void } {
+  hooks: { onChange: (filters: FilterRule[]) => void; onLayout?: () => void },
+): { sync: () => void } {
   const list = shadow.getElementById('filterList');
   const editor = shadow.getElementById('filterEditor');
-  const filtersPane = shadow.getElementById('manageFilters');
-  const settingsPane = shadow.getElementById('manageSettings');
   const newBtn = shadow.getElementById('newFilter');
-  if (!list || !editor || !filtersPane || !settingsPane) {
-    return { sync: () => {}, setTab: () => {} };
+  if (!list || !editor) {
+    return { sync: () => {} };
   }
 
   let editingId: string | null = null;
-  let tab: 'filters' | 'settings' = 'filters';
-
-  const setTab = (next: 'filters' | 'settings'): void => {
-    tab = next;
-    filtersPane.hidden = next !== 'filters';
-    settingsPane.hidden = next !== 'settings';
-    shadow.querySelectorAll('#manageTabs button').forEach((btn) => {
-      (btn as HTMLElement).classList.toggle('on', (btn as HTMLElement).dataset.tab === next);
-    });
-  };
 
   const commit = (filters: FilterRule[]): void => {
     hooks.onChange(filters);
+    requestAnimationFrame(() => hooks.onLayout?.());
   };
 
   const renderEditor = (rule: FilterRule): void => {
     const moduleId = getModuleId();
-    const locked = rule.builtin;
+    const forked = isForkOfDefault(rule);
     const fields = criteriaFor(moduleId);
     editor.classList.remove('hide');
     editor.innerHTML = `
-      <span class="label">${locked ? 'Default filter' : 'Edit filter'}</span>
-      <p class="hint">${locked ? 'Name and rules are locked. Color and order can change. Duplicate to customize.' : 'Saved on each change.'}</p>
+      <span class="label">${rule.builtin ? 'Default filter' : 'Edit filter'}</span>
+      <p class="hint">${rule.builtin ? 'Saving creates a custom copy. The original default stays restorable.' : forked ? 'Custom copy of a default. Restore resets its rules.' : 'Saved on each change.'}</p>
       <label class="range-field"><span>Name</span>
-        <input id="filterName" type="text" maxlength="40" ${locked ? 'disabled' : ''} value="${escapeHtml(rule.name)}" />
+        <input id="filterName" type="text" maxlength="40" value="${escapeHtml(rule.name)}" />
       </label>
       <div class="row-between"><span class="label">Match</span>
         <div class="seg" id="filterMatch">
-          <button type="button" data-mode="and"${rule.matchMode === 'and' ? ' class="on"' : ''}${locked ? ' disabled' : ''}>All</button>
-          <button type="button" data-mode="or"${rule.matchMode !== 'and' ? ' class="on"' : ''}${locked ? ' disabled' : ''}>Any</button>
+          <button type="button" data-mode="and"${rule.matchMode === 'and' ? ' class="on"' : ''}>All</button>
+          <button type="button" data-mode="or"${rule.matchMode !== 'and' ? ' class="on"' : ''}>Any</button>
         </div>
       </div>
       <div class="chips" id="filterSwatches">
@@ -63,14 +52,15 @@ export function initManage(
       <div id="filterFields"></div>
       <div class="chips">
         <button class="ghost" id="closeEditor" type="button" style="flex:1">Done</button>
-        ${locked ? '<button class="ghost" id="dupEditor" type="button" style="flex:1">Duplicate</button>' : '<button class="ghost" id="delEditor" type="button" style="flex:1">Delete</button>'}
+        ${forked ? '<button class="ghost" id="restoreEditor" type="button" style="flex:1">Restore default</button>' : ''}
+        ${rule.builtin ? '' : '<button class="ghost" id="delEditor" type="button" style="flex:1">Delete</button>'}
       </div>`;
 
     const fieldsHost = editor.querySelector('#filterFields') as HTMLElement;
     fields.forEach((spec) => {
       const block = document.createElement('div');
       block.className = 'editor-field';
-      mountCriterion(block, spec.id, rule.criteria, locked, (patch) => {
+      mountCriterion(block, spec.id, rule.criteria, false, (patch) => {
         patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
       });
       fieldsHost.appendChild(block);
@@ -98,22 +88,47 @@ export function initManage(
       editingId = null;
       editor.classList.add('hide');
       editor.innerHTML = '';
+      editor.removeAttribute('data-editing');
+      requestAnimationFrame(() => hooks.onLayout?.());
     });
-    editor.querySelector('#dupEditor')?.addEventListener('click', () => {
-      const copy = duplicateFilter(rule);
-      commit([...(page().filters || []), copy]);
-      editingId = copy.id;
+    editor.querySelector('#restoreEditor')?.addEventListener('click', () => {
+      const restored = restoreFromSource(rule, getModuleId());
+      if (!restored) return;
+      const next = (page().filters || []).map((r) => (r.id === rule.id ? restored : r));
+      editingId = restored.id;
+      commit(next);
     });
     editor.querySelector('#delEditor')?.addEventListener('click', () => {
       if (!confirm(`Delete “${rule.name}”?`)) return;
       editingId = null;
-      commit((page().filters || []).filter((r) => r.id !== rule.id));
+      const list = page().filters || [];
+      const i = list.findIndex((r) => r.id === rule.id);
+      const next = list.filter((r) => r.id !== rule.id);
+      if (rule.sourceId) {
+        const restored = restoreFromSource(rule, getModuleId());
+        if (restored && i >= 0) next.splice(i, 0, { ...restored, enabled: false });
+      }
+      commit(next);
     });
+    requestAnimationFrame(() => hooks.onLayout?.());
   };
 
   function patchRule(id: string, partial: Partial<FilterRule>): void {
-    const next = (page().filters || []).map((r) => (r.id === id ? { ...r, ...partial, criteria: partial.criteria || r.criteria } : r));
-    commit(next);
+    const list = page().filters || [];
+    const cur = list.find((r) => r.id === id);
+    if (!cur) return;
+    const content = 'name' in partial || 'criteria' in partial || 'matchMode' in partial || 'color' in partial;
+    if (cur.builtin && content) {
+      const fork = forkFromBuiltin({
+        ...cur,
+        ...partial,
+        criteria: partial.criteria || cur.criteria,
+      });
+      editingId = fork.id;
+      commit(list.map((r) => (r.id === id ? fork : r)));
+      return;
+    }
+    commit(list.map((r) => (r.id === id ? { ...r, ...partial, criteria: partial.criteria || r.criteria } : r)));
   }
 
   const renderList = (): void => {
@@ -122,11 +137,11 @@ export function initManage(
       <div class="filter-row" data-id="${escapeHtml(rule.id)}">
         <span class="filter-swatch" style="background:${escapeHtml(rule.color)}"></span>
         <span class="filter-name">${escapeHtml(rule.name)}</span>
-        ${rule.builtin ? '<span class="tag-count">Default</span>' : ''}
+        ${rule.builtin ? '<span class="tag-count">Default</span>' : isForkOfDefault(rule) ? '<span class="tag-count">Custom</span>' : ''}
         <button type="button" class="icon-btn" data-act="up" ${i === 0 ? 'disabled' : ''} title="Higher priority">↑</button>
         <button type="button" class="icon-btn" data-act="down" ${i === filters.length - 1 ? 'disabled' : ''} title="Lower priority">↓</button>
         <button type="button" class="toggle${rule.enabled ? ' on' : ''}" data-act="on" title="Active"><i></i></button>
-        <button type="button" class="ghost" data-act="edit" style="height:28px;padding:0 8px">${rule.builtin ? 'View' : 'Edit'}</button>
+        <button type="button" class="ghost" data-act="edit" style="height:28px;padding:0 8px">Edit</button>
       </div>`).join('');
     list.querySelectorAll<HTMLElement>('.filter-row').forEach((row) => {
       const id = row.dataset.id || '';
@@ -165,16 +180,12 @@ export function initManage(
     editingId = created.id;
   });
 
-  shadow.querySelectorAll('#manageTabs button').forEach((btn) => {
-    btn.addEventListener('click', () => setTab((((btn as HTMLElement).dataset.tab || 'filters') as 'filters' | 'settings')));
-  });
-
   const sync = (): void => {
-    setTab(tab);
     renderList();
+    requestAnimationFrame(() => hooks.onLayout?.());
   };
 
-  return { sync, setTab };
+  return { sync };
 }
 
 function mountCriterion(

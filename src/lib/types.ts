@@ -38,6 +38,8 @@ export interface FilterRule {
   color: string;
   matchMode: MatchMode;
   criteria: FilterCriteria;
+  /** Builtin id this custom rule was forked from. Restore puts the default back. */
+  sourceId?: string | null;
 }
 
 export interface PageSettings {

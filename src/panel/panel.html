@@ -9,11 +9,25 @@
   </div>
 </aside>
 <div class="fab" id="fab"><span class="dot" id="fabCount">0</span><span class="label" id="fabLabel">Ops panel</span></div>
+<div class="chrome-row" id="chromeRow">
+<section class="panel manage hide" id="filterPanel">
+  <header class="head" id="filterHandle">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h13" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    <div class="titles"><h1>Filters</h1><p id="filterSub">Priority · color · rules</p></div>
+    <button class="icon-btn" id="closeFilters" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </header>
+  <div class="body">
+    <p class="hint">Up/down is apply order. Editing a default saves a custom copy you can restore.</p>
+    <div id="filterList"></div>
+    <button class="ghost" id="newFilter" type="button">New filter</button>
+    <div class="card hide" id="filterEditor"></div>
+  </div>
+</section>
 <section class="panel" id="panel">
   <header class="head" id="dragHandle">
     <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
     <div class="titles"><h1 id="panelTitle">Ops panel</h1><p id="panelSub">Detecting list…</p></div>
-    <button class="icon-btn" id="openSettings" title="Manage"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2.2"/><path d="M12 3.5v2.2M12 18.3v2.2M4.9 6.5l1.6 1.6M17.5 16.9l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.9 17.5l1.6-1.6M17.5 7.1l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+    <button class="icon-btn" id="openSettings" title="Settings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2.2"/><path d="M12 3.5v2.2M12 18.3v2.2M4.9 6.5l1.6 1.6M17.5 16.9l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.9 17.5l1.6-1.6M17.5 7.1l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
     <button class="icon-btn" id="collapse" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
   </header>
   <div class="body">
@@ -75,6 +89,7 @@
     </div>
   </div>
 </section>
+</div>
 <section class="panel report" id="report">
   <header class="head" id="reportHandle">
     <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
@@ -99,44 +114,32 @@
     <button class="ghost" id="clearRangeFromResults">Clear range</button>
   </div>
 </section>
-<section class="panel manage hide" id="settingsPanel">
+<section class="panel hide" id="settingsPanel">
   <header class="head" id="settingsHandle">
     <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2.2"/><path d="M12 3.5v2.2M12 18.3v2.2M4.9 6.5l1.6 1.6M17.5 16.9l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.9 17.5l1.6-1.6M17.5 7.1l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
-    <div class="titles"><h1>Manage</h1><p id="settingsSub">Filters · Settings</p></div>
+    <div class="titles"><h1>Settings</h1><p id="settingsSub">API key · About</p></div>
     <button class="icon-btn" id="closeSettings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </header>
   <div class="body">
-    <div class="seg" id="manageTabs">
-      <button type="button" data-tab="filters">Filters</button>
-      <button type="button" data-tab="settings">Settings</button>
+    <div class="card">
+      <span class="label">API key</span>
+      <p class="hint">From Profile settings. Stored by the extension, not in page storage.</p>
+      <input id="apiKeyInput" type="password" placeholder="Paste key · Save" autocomplete="off" spellcheck="false" />
+      <p class="hint" id="apiKeyStatus">No key saved</p>
     </div>
-    <div id="manageFilters">
-      <p class="hint">Drag order with up/down. First matching on filter paints the row in that color.</p>
-      <div id="filterList"></div>
-      <button class="ghost" id="newFilter" type="button">New filter</button>
-      <div class="card hide" id="filterEditor"></div>
-    </div>
-    <div id="manageSettings" hidden>
-      <div class="card">
-        <span class="label">API key</span>
-        <p class="hint">From Profile settings. Stored by the extension, not in page storage.</p>
-        <input id="apiKeyInput" type="password" placeholder="Paste key · Save" autocomplete="off" spellcheck="false" />
-        <p class="hint" id="apiKeyStatus">No key saved</p>
-        <div class="chips">
-          <button class="primary" id="saveApiKey" type="button" style="flex:1">Save key</button>
-          <button class="ghost" id="clearApiKey" type="button" style="flex:1">Clear key</button>
-        </div>
+    <div class="card" id="aboutCard">
+      <span class="label">About</span>
+      <div class="about-meta">
+        <div class="row-between"><span class="hint">Version</span><span id="aboutVersion">—</span></div>
+        <div class="row-between"><span class="hint">Publisher</span><span id="aboutPublisher">AsP3X</span></div>
       </div>
-      <div class="card" id="aboutCard">
-        <span class="label">About</span>
-        <div class="about-meta">
-          <div class="row-between"><span class="hint">Version</span><span id="aboutVersion">—</span></div>
-          <div class="row-between"><span class="hint">Publisher</span><span id="aboutPublisher">AsP3X</span></div>
-        </div>
-        <p class="hint" id="aboutUpdateStatus">Use Check for updates to look on GitHub.</p>
-        <a class="primary" id="aboutReleaseLink" hidden href="https://github.com/AsP3X/fs-tooling/releases/latest" target="_blank" rel="noopener noreferrer">View release</a>
-        <button class="ghost" id="checkUpdates" type="button">Check for updates</button>
-      </div>
+      <p class="hint" id="aboutUpdateStatus">Use Check for updates to look on GitHub.</p>
+      <a class="primary" id="aboutReleaseLink" hidden href="https://github.com/AsP3X/fs-tooling/releases/latest" target="_blank" rel="noopener noreferrer">View release</a>
+      <button class="ghost" id="checkUpdates" type="button">Check for updates</button>
     </div>
+  </div>
+  <div class="foot">
+    <button class="primary" id="saveApiKey">Save key</button>
+    <button class="ghost" id="clearApiKey">Clear key</button>
   </div>
 </section>

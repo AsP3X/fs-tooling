@@ -40,10 +40,14 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const report = $('report');
   const settingsPanel = $('settingsPanel');
   const resultsPanel = $('resultsPanel');
+  const filterPanel = $('filterPanel');
+  const chromeRow = $('chromeRow');
   const about = initAbout(shadow);
   let reportOpen = false;
   let settingsOpen = false;
   let resultsOpen = false;
+  let filterOpen = false;
+  let panelPin: { x: number; y: number } | null = null;
   const didDrag = { current: false };
   let rangeDraft: { startFrom: string | null; startTo: string | null } | null = null;
   let rangeDraftModule: ReturnType<typeof getModuleId> | null = null;
@@ -256,6 +260,33 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     else placeDefault();
   }
 
+  function placeFilterSide(): void {
+    const main = panel.getBoundingClientRect();
+    const need = 488;
+    const rightSpace = window.innerWidth - main.right;
+    const leftSpace = main.left;
+    const side = rightSpace >= need || rightSpace >= leftSpace ? 'right' : 'left';
+    filterPanel.style.order = side === 'left' ? '0' : '2';
+    panel.style.order = '1';
+    chromeRow.dataset.side = side;
+  }
+
+  // Human: Keep the main panel where it is when the side dialog opens or grows.
+  // Agent: WRITES host left/top so panel.getBoundingClientRect matches panelPin, then clamps.
+  function pinChrome(): void {
+    void host.offsetWidth;
+    if (panel.classList.contains('hide') || !filterOpen) {
+      applySavedPosition();
+      return;
+    }
+    placeFilterSide();
+    void host.offsetWidth;
+    const main = panel.getBoundingClientRect();
+    if (!panelPin) panelPin = { x: main.left, y: main.top };
+    const hostRect = host.getBoundingClientRect();
+    placeAt(hostRect.left + (panelPin.x - main.left), hostRect.top + (panelPin.y - main.top));
+  }
+
   function renderStats(): void {
     const lastStats = getLastStats();
     const totalMarked = lastStats.marked + lastStats.extraMarked;
@@ -276,7 +307,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const key = await getApiKey();
     const present = !!key.trim();
     $('apiKeyStatus').textContent = present ? `Saved · ${maskApiKey(key)}` : 'No key saved';
-    $('settingsSub').textContent = present ? 'Filters · API key saved' : 'Filters · Settings';
+    $('settingsSub').textContent = present ? 'API key saved' : 'API access';
     setApiKeyPresent(present);
     if (!present && resultsOpen) {
       resultsOpen = false;
@@ -412,19 +443,22 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const open = settings.uiOpen || {};
     shadow.querySelectorAll<HTMLElement>('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec || '']));
     const overlay = reportOpen || settingsOpen || resultsOpen;
+    if (overlay || settings.collapsed) filterOpen = false;
     panel.classList.toggle('hide', settings.collapsed || overlay);
     fab.classList.toggle('show', settings.collapsed && !overlay);
     report.classList.toggle('show', reportOpen && !settings.collapsed);
     settingsPanel.classList.toggle('hide', !settingsOpen || settings.collapsed);
     resultsPanel.classList.toggle('show', resultsOpen && !settings.collapsed);
     resultsPanel.classList.toggle('hide', !resultsOpen || settings.collapsed);
+    filterPanel.classList.toggle('hide', !filterOpen || settings.collapsed || overlay);
     renderFilterChips();
     renderSortKeys();
-    if (settingsOpen) manage.sync();
+    if (filterOpen) manage.sync();
     applyFeatureVisibility(shadow, ctx);
     syncRegisteredFeatures($('featureMount'), ctx);
     applyPageStyles();
-    applySavedPosition();
+    if (filterOpen && !panel.classList.contains('hide')) pinChrome();
+    else applySavedPosition();
     renderStats();
   }
 
@@ -442,6 +476,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   const manage = initManage(shadow, {
     onChange: (filters) => applyFilters(filters),
+    onLayout: () => pinChrome(),
   });
 
   function makeDraggable(handle: HTMLElement): void {
@@ -465,6 +500,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
         const p = placeAt(origX + dx, origY + dy);
         if (getSettings().collapsed) assignRoot({ fabX: p.x, fabY: p.y });
         else assignRoot({ x: p.x, y: p.y });
+        const main = panel.getBoundingClientRect();
+        panelPin = { x: main.left, y: main.top };
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
@@ -483,6 +520,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   makeDraggable($('reportHandle'));
   makeDraggable($('settingsHandle'));
   makeDraggable($('resultsHandle'));
+  makeDraggable($('filterHandle'));
   makeDraggable(fab);
 
   shadow.addEventListener('click', (e) => {
@@ -538,19 +576,21 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   shadow.querySelectorAll('#sortDir button').forEach((btn) => {
     btn.addEventListener('click', () => updatePage({ sortDir: ((btn as HTMLElement).dataset.dir || 'asc') as SortDir }));
   });
-  const openManage = (tab: 'filters' | 'settings'): void => {
-    settingsOpen = true;
+  $('openManage').addEventListener('click', () => {
+    const main = panel.getBoundingClientRect();
+    panelPin = { x: main.left, y: main.top };
+    filterOpen = true;
+    settingsOpen = false;
     reportOpen = false;
     resultsOpen = false;
-    manage.setTab(tab);
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
-    if (tab === 'settings') {
-      void refreshApiKeyStatus();
-      void about.refresh();
-    }
-  };
-  $('openManage').addEventListener('click', () => openManage('filters'));
+  });
+  $('closeFilters').addEventListener('click', (e) => {
+    e.stopPropagation();
+    filterOpen = false;
+    syncUI();
+  });
   $('collapse').addEventListener('click', (e) => {
     e.stopPropagation();
     updateRoot({ collapsed: true });
@@ -578,7 +618,14 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   });
   $('openSettings').addEventListener('click', (e) => {
     e.stopPropagation();
-    openManage('settings');
+    settingsOpen = true;
+    filterOpen = false;
+    reportOpen = false;
+    resultsOpen = false;
+    if (getSettings().collapsed) updateRoot({ collapsed: false });
+    else syncUI();
+    void refreshApiKeyStatus();
+    void about.refresh();
   });
   $('closeSettings').addEventListener('click', (e) => {
     e.stopPropagation();

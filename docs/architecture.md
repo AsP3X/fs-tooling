@@ -75,7 +75,7 @@ Each module has an ordered list of **filters** (defaults + custom). Each filter 
 
 Enabled filters run **in list order**. The first match paints the row in that filter’s color. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
 
-Built-in criteria stay locked; users duplicate a default to customize it. `sth-settings-v2` still holds the live recipe fields for compatibility; `filters` is merged on load.
+Editing a default and saving forks a custom copy (`sourceId`) in the same slot; **Restore default** puts the built-in back. `sth-settings-v2` still holds the live recipe fields for compatibility; `filters` is merged on load. The filter manager is a wider side panel next to the main UI.
 
 ## Matching
 

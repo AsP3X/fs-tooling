@@ -5,8 +5,10 @@ import {
   blankFilter,
   duplicateFilter,
   firstMatchingFilter,
+  forkFromBuiltin,
   mergeFilterList,
   moveFilter,
+  restoreFromSource,
   ruleMatches,
 } from './filters';
 import type { FilterRule, Matchable } from './types';
@@ -71,7 +73,7 @@ describe('firstMatchingFilter', () => {
   });
 });
 
-describe('mergeFilterList', () => {
+describe('mergeFilterList builtins', () => {
   it('seeds ticket builtins and enables Idle 6d by default', () => {
     const list = mergeFilterList(defaultPage(), 'tickets');
     expect(list.some((r) => r.id === 'idle-6' && r.enabled && r.builtin)).toBe(true);
@@ -103,6 +105,40 @@ describe('moveFilter', () => {
     ];
     expect(moveFilter(list, 'b', -1).map((r) => r.id)).toEqual(['b', 'a', 'c']);
     expect(moveFilter(list, 'a', -1)).toBe(list);
+  });
+});
+
+describe('forkFromBuiltin', () => {
+  it('creates a custom copy that restore can turn back into the default', () => {
+    const idle = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'idle-6');
+    if (!idle) throw new Error('missing idle-6');
+    const fork = forkFromBuiltin({ ...idle, criteria: { idleDays: 12 } });
+    expect(fork.builtin).toBe(false);
+    expect(fork.sourceId).toBe('idle-6');
+    expect(fork.id).not.toBe('idle-6');
+    expect(fork.criteria.idleDays).toBe(12);
+    const restored = restoreFromSource(fork, 'tickets');
+    expect(restored?.id).toBe('idle-6');
+    expect(restored?.builtin).toBe(true);
+    expect(restored?.criteria.idleDays).toBe(6);
+    expect(restored?.enabled).toBe(fork.enabled);
+  });
+});
+
+describe('mergeFilterList', () => {
+  it('does not re-insert a default that already has a custom fork', () => {
+    const fork = forkFromBuiltin({
+      id: 'idle-6',
+      name: 'Idle 6d',
+      builtin: true,
+      enabled: true,
+      color: '#e65100',
+      matchMode: 'or',
+      criteria: { idleDays: 12 },
+    });
+    const list = mergeFilterList(defaultPage({ filters: [fork] }), 'tickets');
+    expect(list.some((r) => r.id === 'idle-6')).toBe(false);
+    expect(list.some((r) => r.sourceId === 'idle-6' && r.criteria.idleDays === 12)).toBe(true);
   });
 });
 
