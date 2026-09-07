@@ -34,9 +34,22 @@ export function ticketHref(row: Element, origin: string = location.origin): stri
   }
 }
 
+function cleanStatus(raw: string | null | undefined): string {
+  return String(raw || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Badge title first, then the status cell text, then "Open since N days" on the trigger. */
 export function rowStatus(row: Element): string {
-  const badge = row.querySelector('[data-test-id="state-cell"] span, .status-result, td[data-name="status"] [title]');
-  if (badge) return String(badge.getAttribute('title') || badge.textContent || '').replace(/\s+/g, ' ').trim();
+  const badge = row.querySelector('[data-test-id="state-cell"] span, .status-result, td[data-name="status"] [title], td[data-name="ticket_status"] [title]');
+  const fromBadge = cleanStatus(badge?.getAttribute('title') || badge?.textContent);
+  if (fromBadge) return fromBadge;
+  const cell = row.querySelector('td[data-name="status"], td[data-name="ticket_status"]');
+  const fromCell = cleanStatus(cell?.getAttribute('title') || cell?.textContent);
+  if (fromCell) return fromCell;
+  const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
+  const label = trigger?.getAttribute('aria-label') || '';
+  const since = label.match(/^(.*?)\s+since\s+\d+\s+days?/i);
+  if (since?.[1]) return cleanStatus(since[1]);
   return '';
 }
 
@@ -76,11 +89,38 @@ function cellDate(cell: Element | null): Date | null {
   return parseTicketDate(titled?.getAttribute('title') || cell.getAttribute('title') || cell.textContent);
 }
 
+/** First parseable token wins so a class like col-1 cannot override title="Urgent". */
+function firstPriority(values: Array<string | null | undefined>): number | null {
+  for (let i = 0; i < values.length; i += 1) {
+    const n = parsePriority(values[i]);
+    if (n != null) return n;
+  }
+  return null;
+}
+
 export function rowPriority(row: Element): number | null {
-  const cell = namedCell(row, ['priority']);
+  const cell = namedCell(row, ['priority', 'ticket_priority', 'priority_name']);
   if (!cell) return null;
-  const titled = cell.querySelector('[title]');
-  return parsePriority(titled?.getAttribute('title') || cell.textContent);
+  const nested: string[] = [];
+  cell.querySelectorAll('[title], [aria-label], [alt], [data-value], [data-priority]').forEach((el) => {
+    nested.push(
+      el.getAttribute('data-value') || '',
+      el.getAttribute('data-priority') || '',
+      el.getAttribute('title') || '',
+      el.getAttribute('aria-label') || '',
+      el.getAttribute('alt') || '',
+      el.getAttribute('class') || '',
+    );
+  });
+  return firstPriority([
+    cell.getAttribute('data-value'),
+    cell.getAttribute('data-priority'),
+    cell.getAttribute('title'),
+    cell.getAttribute('aria-label'),
+    ...nested,
+    cell.getAttribute('class'),
+    cell.textContent,
+  ]);
 }
 
 export function rowDueDate(row: Element): Date | null {

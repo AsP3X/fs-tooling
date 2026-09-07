@@ -39,7 +39,7 @@ export function initManage(
         openGroups.clear();
         CRITERION_GROUPS.forEach((g) => {
           const ids = fields.filter((f) => f.group === g.id).map((f) => f.id);
-          if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age') openGroups.add(g.id);
+          if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age' || g.id === 'priority') openGroups.add(g.id);
         });
       }
       seededId = rule.id;

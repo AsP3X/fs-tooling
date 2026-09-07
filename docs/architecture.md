@@ -82,7 +82,7 @@ Editing a default and saving forks a custom copy (`sourceId`) in the same slot; 
 `itemMatches` in `src/lib/match.ts`:
 
 - **OR / AND** still skip empty dimensions. **Exclude statuses** always cuts those statuses (it is not an Any dimension). **Invert** paints rows that miss the rule instead of those that match.
-- Tickets: idle band, created age, include/exclude status, requester, subject phrase, priority, due / overdue, escalated, unassigned.
+- Tickets: idle band, created age, include/exclude status, **priority** (Low–Urgent), requester, subject phrase, due / overdue, escalated, unassigned. Priority is its own editor group on ticket lists.
 - Journeys: the same age/status/subject rules, plus kind (Internal/External), initiator, start dates, start already passed or within N days, and a child-progress band.
 - **Date range** does not participate. It only fills the Range results overlay.
 

@@ -15,12 +15,13 @@ export function parsePriority(raw: string | number | null | undefined): number |
     const n = Math.round(raw);
     return n >= 1 && n <= 4 ? n : null;
   }
-  const s = String(raw || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const s = String(raw || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!s) return null;
-  if (s === '1' || /\blow\b/.test(s)) return 1;
-  if (s === '2' || /\bmedium\b/.test(s) || s === 'med') return 2;
-  if (s === '3' || /\bhigh\b/.test(s)) return 3;
-  if (s === '4' || /\burgent\b/.test(s)) return 4;
+  // Urgent before High so a combined label cannot collapse to High.
+  if (/\burgent\b/.test(s) || s === '4') return 4;
+  if (/\bhigh\b/.test(s) || s === '3') return 3;
+  if (/\bmedium\b/.test(s) || s === 'med' || s === '2') return 2;
+  if (/\blow\b/.test(s) || s === '1') return 1;
   return null;
 }
 

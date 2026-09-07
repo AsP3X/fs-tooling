@@ -39,7 +39,7 @@ export const PROG_BUCKETS = [
 
 export const TICKET_PRESETS: Preset[] = [
   { id: 'idle-6', name: 'Idle 6d', days: 6, statuses: [], matchMode: 'or' },
-  { id: 'open-idle', name: 'Open + idle', days: 6, statuses: ['Open'], matchMode: 'and' },
+  { id: 'open-idle', name: 'Open', days: 6, statuses: ['Open'], matchMode: 'or' },
   { id: 'pending-3', name: 'Pending 3d', days: 3, statuses: ['Pending'], matchMode: 'and' },
   { id: 'w3p', name: '3rd party', days: 3, statuses: ['Waiting for third party'], matchMode: 'and' },
 ];

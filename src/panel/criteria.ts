@@ -104,6 +104,12 @@ export function mountCriterion(
     const selected = asNumberList(criteria.priorities);
     host.innerHTML = `<span class="label">Priority</span><div class="chips"></div>`;
     const chips = host.querySelector('.chips') as HTMLElement;
+    const off = document.createElement('button');
+    off.type = 'button';
+    off.className = `chip${selected.length ? '' : ' on'}`;
+    off.textContent = 'Off';
+    off.addEventListener('click', () => onPatch({ priorities: [] }));
+    chips.appendChild(off);
     PRIORITIES.forEach((p) => {
       const btn = document.createElement('button');
       btn.type = 'button';

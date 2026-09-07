@@ -60,6 +60,31 @@ describe('collectRows', () => {
     expect(row.dueIn).toBeCloseTo(-3, 0);
   });
 
+  it('reads icon-only and data-value priority cells', () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="subject"><a class="subject-cell" href="/a/tickets/8">Hi</a></td>
+            <td data-name="ticket_priority"><i class="icon-priority-high" aria-label="High"></i></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    expect(collectRows(document, NOW)[0].priority).toBe(3);
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="subject"><a class="subject-cell" href="/a/tickets/9">Hi</a></td>
+            <td data-name="priority" data-value="4"></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    expect(collectRows(document, NOW)[0].priority).toBe(4);
+  });
+
   it('prefers status-age "since N days" over Updated', () => {
     document.body.innerHTML = `
       <table>
@@ -74,5 +99,20 @@ describe('collectRows', () => {
     `;
     const [row] = collectRows(document, NOW);
     expect(row.idleDays).toBe(11);
+    expect(row.status).toBe('Open');
+  });
+
+  it('reads a plain status cell without a title attribute', () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="subject"><a class="subject-cell" href="/a/tickets/2">Hi</a></td>
+            <td data-name="status">Open</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    expect(collectRows(document, NOW)[0].status).toBe('Open');
   });
 });

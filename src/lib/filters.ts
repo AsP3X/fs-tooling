@@ -4,7 +4,7 @@
 import type { FilterCriteria, FilterRule, Matchable, MatchMode, ModuleId, PageSettings, Preset } from './types';
 
 export type FilterModule = ModuleId | 'global';
-export type CriterionGroupId = 'age' | 'status' | 'people' | 'ticket' | 'schedule' | 'text';
+export type CriterionGroupId = 'age' | 'status' | 'priority' | 'people' | 'ticket' | 'schedule' | 'text';
 
 export interface CriterionDef {
   id: string;
@@ -23,8 +23,9 @@ export interface FilterPageDef {
 export const CRITERION_GROUPS: Array<{ id: CriterionGroupId; label: string; hint?: string }> = [
   { id: 'age', label: 'Age' },
   { id: 'status', label: 'Status' },
+  { id: 'priority', label: 'Priority', hint: 'Needs the Priority column on the list, or an API key.' },
   { id: 'people', label: 'People' },
-  { id: 'ticket', label: 'Ticket', hint: 'Uses list columns when visible, or the API when a key is saved.' },
+  { id: 'ticket', label: 'Due & SLA', hint: 'Uses list columns when visible, or the API when a key is saved.' },
   { id: 'schedule', label: 'Start & progress' },
   { id: 'text', label: 'Subject' },
 ];
@@ -191,7 +192,7 @@ registerCriterion({
 registerCriterion({
   id: 'priorities',
   modules: ['tickets'],
-  group: 'ticket',
+  group: 'priority',
   evaluate: (item, c) => {
     const ids = asNumberList(c.priorities);
     if (!ids.length) return null;
@@ -289,8 +290,8 @@ registerFilterPage({
       criteria: { idleDays: 6 },
     }),
     makeRule({
-      id: 'open-idle', name: 'Open + idle', builtin: true, color: '#c62828', matchMode: 'and',
-      criteria: { idleDays: 6, statuses: ['Open'] },
+      id: 'open-idle', name: 'Open', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { statuses: ['Open'] },
     }),
     makeRule({
       id: 'pending-3', name: 'Pending 3d', builtin: true, color: '#6a1b9a', matchMode: 'and',
@@ -307,6 +308,10 @@ registerFilterPage({
     makeRule({
       id: 'unassigned', name: 'Unassigned', builtin: true, color: '#6a1b9a', matchMode: 'or',
       criteria: { unassigned: true },
+    }),
+    makeRule({
+      id: 'high', name: 'High', builtin: true, color: '#e65100', matchMode: 'or',
+      criteria: { priorities: [3] },
     }),
     makeRule({
       id: 'urgent', name: 'Urgent', builtin: true, color: '#c62828', matchMode: 'or',

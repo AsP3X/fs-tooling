@@ -8,6 +8,8 @@ describe('parsePriority', () => {
     expect(parsePriority('high')).toBe(3);
     expect(parsePriority('Medium')).toBe(2);
     expect(parsePriority('Low')).toBe(1);
+    expect(parsePriority('priority-urgent')).toBe(4);
+    expect(parsePriority('icon priority_high')).toBe(3);
     expect(parsePriority('nope')).toBeNull();
   });
 });

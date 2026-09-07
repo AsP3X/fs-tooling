@@ -81,6 +81,15 @@ describe('mergeFilterList builtins', () => {
     expect(list.filter((r) => r.builtin).length).toBeGreaterThan(1);
   });
 
+  it('renames Open and matches status without requiring idle', () => {
+    const open = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'open-idle');
+    expect(open?.name).toBe('Open');
+    expect(open?.criteria.idleDays).toBeUndefined();
+    expect(open?.criteria.statuses).toEqual(['Open']);
+    expect(ruleMatches(item({ idleDays: 0, status: 'Open' }), open!, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ idleDays: 10, status: 'Pending' }), open!, 'tickets')).toBe(false);
+  });
+
   it('keeps user order, enabled, and color on builtins', () => {
     const stored = defaultPage({
       filters: [
@@ -257,5 +266,15 @@ describe('new criteria', () => {
     expect(list.find((r) => r.id === 'overdue')?.enabled).toBe(false);
     expect(list.find((r) => r.id === 'unassigned')?.builtin).toBe(true);
     expect(list.find((r) => r.id === 'urgent')?.criteria.priorities).toEqual([4]);
+    expect(list.find((r) => r.id === 'high')?.enabled).toBe(false);
+    expect(list.find((r) => r.id === 'high')?.criteria.priorities).toEqual([3]);
+  });
+
+  it('priority extra matches any selected level', () => {
+    const r = rule({ id: 'p', name: 'P', criteria: { priorities: [3, 4] } });
+    expect(ruleMatches(item({ priority: 3 }), r, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priority: 4 }), r, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priority: 1 }), r, 'tickets')).toBe(false);
+    expect(ruleMatches(item({ priority: null }), r, 'tickets')).toBe(false);
   });
 });
