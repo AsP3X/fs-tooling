@@ -1,9 +1,15 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
-// Human: MV3 service worker. Stores the API key and proxies /api/v2 calls so the content script never sends Authorization.
-// Agent: READS/WRITES chrome.storage.local sth.apiKey. sth.api.fetch validates HTTPS Freshservice origin and /api/v2 path.
+// Human: MV3 service worker. API key, Freshservice /api/v2 proxy, and GitHub Releases update check.
+// Agent: READS/WRITES chrome.storage.local sth.apiKey, sth.updates.cache, sth.updates.dismissed. sth.api.fetch validates HTTPS Freshservice origin and /api/v2 path. sth.updates.check FETCH only the public latest-release URL.
 
 const STORAGE_KEY = 'sth.apiKey';
+const UPDATE_CACHE_KEY = 'sth.updates.cache';
+const UPDATE_DISMISSED_KEY = 'sth.updates.dismissed';
+// Keep in sync with GITHUB_RELEASES_API / UPDATE_CHECK_MAX_AGE_MS / UPDATE_RETRY_MS in src/lib/updates.ts.
+const GITHUB_RELEASES_LATEST = 'https://api.github.com/repos/AsP3X/fs-tooling/releases/latest';
+const UPDATE_MAX_AGE_MS = 86400000;
+const UPDATE_RETRY_MS = 15 * 60 * 1000;
 
 function allowedOrigin(origin) {
   try {
@@ -46,6 +52,174 @@ async function handleApiFetch(message) {
   }
 }
 
+function installedVersion() {
+  try {
+    return String(chrome.runtime.getManifest().version || '');
+  } catch {
+    return '';
+  }
+}
+
+function githubReleaseUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (parsed.protocol !== 'https:') return '';
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'github.com' && host !== 'www.github.com') return '';
+    if (!parsed.pathname.toLowerCase().startsWith('/asp3x/fs-tooling/')) return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function snapshotRelease(json) {
+  if (!json || typeof json !== 'object') return null;
+  const tagName = String(json.tag_name || json.tagName || '').trim();
+  if (!tagName) return null;
+  return {
+    tagName,
+    name: String(json.name || '').trim(),
+    htmlUrl: githubReleaseUrl(json.html_url || json.htmlUrl),
+  };
+}
+
+function readCache(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const checkedAt = Number(raw.checkedAt);
+  if (!Number.isFinite(checkedAt)) return null;
+  return {
+    checkedAt,
+    etag: String(raw.etag || ''),
+    error: !!raw.error,
+    release: snapshotRelease(raw.release),
+  };
+}
+
+function cacheIsFresh(cache, now) {
+  if (!cache) return false;
+  if (cache.checkedAt > now) return false;
+  const maxAge = cache.error ? UPDATE_RETRY_MS : UPDATE_MAX_AGE_MS;
+  return now - cache.checkedAt < maxAge;
+}
+
+async function storedUpdateState() {
+  const stored = await chrome.storage.local.get([UPDATE_CACHE_KEY, UPDATE_DISMISSED_KEY]);
+  return {
+    cache: readCache(stored[UPDATE_CACHE_KEY]),
+    dismissed: String(stored[UPDATE_DISMISSED_KEY] || '').trim() || null,
+  };
+}
+
+function updatePayload(release, dismissed, extra) {
+  return {
+    ok: true,
+    currentVersion: installedVersion(),
+    dismissed,
+    release,
+    ...extra,
+  };
+}
+
+async function writeUpdateCache(entry) {
+  await chrome.storage.local.set({ [UPDATE_CACHE_KEY]: entry });
+}
+
+async function rememberFailedCheck(cache, now) {
+  await writeUpdateCache({
+    checkedAt: now,
+    etag: cache?.etag || '',
+    error: true,
+    release: cache?.release || null,
+  });
+}
+
+let updatesCheckInFlight = null;
+
+// Human: GitHub REST "Get the latest release". Cache 24h (15m after errors), then revalidate with ETag.
+// Agent: READS/WRITES sth.updates.cache + sth.updates.dismissed. FETCH only GITHUB_RELEASES_LATEST. Coalesces overlapping checks. RETURNS a small snapshot, never the notes body.
+async function runUpdatesCheck() {
+  const now = Date.now();
+  try {
+    const { cache, dismissed } = await storedUpdateState();
+    if (cacheIsFresh(cache, now)) {
+      return updatePayload(cache?.release || null, dismissed, { fromCache: true });
+    }
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (cache?.etag) headers['If-None-Match'] = cache.etag;
+    const res = await fetch(GITHUB_RELEASES_LATEST, {
+      method: 'GET',
+      headers,
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+    const latestDismissed = (await storedUpdateState()).dismissed;
+    if (res.status === 304) {
+      await writeUpdateCache({
+        checkedAt: now,
+        etag: cache?.etag || '',
+        error: false,
+        release: cache?.release || null,
+      });
+      return updatePayload(cache?.release || null, latestDismissed, { fromCache: true });
+    }
+    if (!res.ok) {
+      await rememberFailedCheck(cache, now);
+      return {
+        ok: false,
+        currentVersion: installedVersion(),
+        dismissed: latestDismissed,
+        release: cache?.release || null,
+        error: 'http',
+      };
+    }
+    let json = null;
+    try { json = await res.json(); } catch { json = null; }
+    const release = snapshotRelease(json);
+    await writeUpdateCache({
+      checkedAt: now,
+      etag: res.headers.get('ETag') || '',
+      error: false,
+      release,
+    });
+    return updatePayload(release, latestDismissed, { fromCache: false });
+  } catch {
+    const { cache, dismissed } = await storedUpdateState().catch(() => ({ cache: null, dismissed: null }));
+    try { await rememberFailedCheck(cache, now); } catch { /* ignore */ }
+    return {
+      ok: false,
+      currentVersion: installedVersion(),
+      dismissed,
+      release: cache?.release || null,
+      error: 'fetch_failed',
+    };
+  }
+}
+
+function handleUpdatesCheck() {
+  if (updatesCheckInFlight) return updatesCheckInFlight;
+  updatesCheckInFlight = runUpdatesCheck().finally(() => {
+    updatesCheckInFlight = null;
+  });
+  return updatesCheckInFlight;
+}
+
+async function handleUpdatesDismiss(message) {
+  const version = String(message?.version || '').trim();
+  if (!/^\d+\.\d+\.\d+(\.\d+)?$/.test(version)) {
+    return { ok: false, error: 'bad_version' };
+  }
+  await chrome.storage.local.set({ [UPDATE_DISMISSED_KEY]: version });
+  return { ok: true };
+}
+
+function reply(sendResponse, op) {
+  op.then(sendResponse, () => sendResponse({ ok: false, error: 'failed' }));
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const type = message?.type;
   if (type === 'sth.secrets.get') {
@@ -68,6 +242,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (type === 'sth.api.fetch') {
     handleApiFetch(message).then(sendResponse);
+    return true;
+  }
+  if (type === 'sth.updates.check') {
+    reply(sendResponse, handleUpdatesCheck());
+    return true;
+  }
+  if (type === 'sth.updates.dismiss') {
+    reply(sendResponse, handleUpdatesDismiss(message));
     return true;
   }
   return undefined;

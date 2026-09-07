@@ -2,18 +2,19 @@
 
 ← [Back to main README](../README.md) · [Documentation index](./README.md)
 
-The product is a Manifest V3 **content script** plus a small **service worker** (API key storage). Chrome and Edge load the same package.
+The product is a Manifest V3 **content script** plus a small **service worker** (API key storage and GitHub update check). Chrome and Edge load the same package.
 
 ```
 src/
   content.ts            Content-script entry (host, observer)
-  background.ts         Service worker — API key in chrome.storage.local
+  background.ts         Service worker — API key + GitHub update check
   lib/                  Pure or DOM-scrape helpers (unit-tested)
     context.ts          list / detail / other + module
     dates.ts            Ticket cell dates + journey Start-from-title
     match.ts            AND/OR idle / status / start / progress
     range.ts            Inclusive from–to keys for the results overlay
     secrets.ts          Message the worker (or sessionStorage in userscripts)
+    updates.ts          GitHub latest-release compare + dismiss rule
     settings.ts         localStorage merge + normalize
     rows.ts             tr.et-tr → RowItem
     sort.ts             Visible-page comparator
@@ -46,8 +47,16 @@ A from–to **date range** (`startFrom` / `startTo`) is a separate overlay, not 
 | `sth-settings-v2` | Page `localStorage` | Module, panel position, per-page filters/views |
 | `sth-history-v2` | Page `localStorage` | Rolling statistics snapshots (counts/averages only) |
 | `sth.apiKey` | Extension `chrome.storage.local` (service worker) | Freshservice API key. Never written to page storage. |
+| `sth.updates.cache` | Extension `chrome.storage.local` (service worker) | Last GitHub `/releases/latest` snapshot + ETag, max-age 24h |
+| `sth.updates.dismissed` | Extension `chrome.storage.local` (service worker) | Addon version the user dismissed (e.g. `2.8.0`). Toast stays hidden until a newer version. |
 
 Panel settings keys live on the **host page** origin so a Tampermonkey install and the extension share views. The API key does not: the extension keeps it in the worker; the userscript build falls back to `sessionStorage`.
+
+## Addon updates
+
+The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). CI tags look like `v2.7.0-42`; comparison uses the addon version (`2.7.0`) and ignores the build suffix, so a new zip of the same version does not notify.
+
+If that version is newer than `chrome.runtime.getManifest().version` and has not been dismissed, the panel shows a toast. **Dismiss** writes `sth.updates.dismissed` and hides the toast until a higher version is published. The userscript build has no worker and skips the check.
 
 ## Context-based features
 

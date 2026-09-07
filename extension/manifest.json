@@ -20,7 +20,8 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://*.freshservice.com/*",
-    "https://*.myfreshworks.com/*"
+    "https://*.myfreshworks.com/*",
+    "https://api.github.com/repos/AsP3X/fs-tooling/releases/*"
   ],
   "background": {
     "service_worker": "background.js"

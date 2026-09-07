@@ -1,4 +1,4 @@
-// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, drag position.
+// Human: Shadow-DOM ops panel: filters, saved views, sort, statistics, date-range overlay, GitHub update toast, drag position.
 // Agent: READS/WRITES settings via patchRoot/patchPage; CALLS markTickets on highlight-filter changes. Range overlay CALLS listRangeResults and does not mutate the host table.
 
 import { listRangeResults } from '../lib/api/enrich';
@@ -19,6 +19,7 @@ import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
 import { syncStartColumnHeader } from '../page/start-column';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
+import { initUpdateToast } from './update-toast';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
 
@@ -466,7 +467,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const cfg = page();
     const settings = getSettings();
     const labels = contextLabel(ctx);
-    shadow.querySelectorAll<HTMLElement>('.panel, .fab, .logo, .toggle, input[type="range"], .primary').forEach((el) => {
+    shadow.querySelectorAll<HTMLElement>('.panel, .fab, .logo, .toggle, input[type="range"], .primary, .update-toast').forEach((el) => {
       el.style.setProperty('--accent', cfg.color);
     });
     $('panelTitle').textContent = labels.title;
@@ -825,4 +826,5 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   applyPageStyles();
   syncUI();
   void refreshApiKeyStatus();
+  initUpdateToast(shadow, () => applySavedPosition());
 }

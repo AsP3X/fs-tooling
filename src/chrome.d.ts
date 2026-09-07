@@ -6,10 +6,19 @@ declare global {
       id?: string;
       lastError?: { message: string };
       sendMessage: (message: unknown) => Promise<unknown>;
+      getManifest: () => { version: string };
       onMessage: {
         addListener: (
           fn: (
-            message: { type?: string; apiKey?: string; origin?: string; path?: string; method?: string; body?: string },
+            message: {
+              type?: string;
+              apiKey?: string;
+              origin?: string;
+              path?: string;
+              method?: string;
+              body?: string;
+              version?: string;
+            },
             sender: unknown,
             sendResponse: (response: unknown) => void,
           ) => boolean | void,
