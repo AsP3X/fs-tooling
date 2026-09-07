@@ -2,7 +2,9 @@
 // Agent: READS /api/v2/ticket_form_fields and /api/v2/tickets/filter. Caches maps for 10 minutes.
 
 import { MS_DAY } from '../constants';
-import { dateKey } from '../dates';
+import { ageDays, dateKey, daysUntil } from '../dates';
+import { employeeKind, sanitizeTitle } from '../text';
+import { parsePriority } from '../ticket-fields';
 import type { PageSettings, Reportable } from '../types';
 import { apiRequest, asArray, asRecord } from './http';
 import { buildTicketFilterQuery, chunkIds, idsQuery } from './query';
@@ -16,6 +18,10 @@ export interface ApiTicket {
   due_by?: string | null;
   is_escalated?: boolean;
   fr_escalated?: boolean;
+  priority?: number | null;
+  /** null = unassigned; undefined = field missing from the payload. */
+  responderId?: number | null;
+  requesterName?: string;
 }
 
 export interface StatusMaps {
@@ -94,6 +100,32 @@ export async function getStatusMaps(force = false): Promise<StatusMaps> {
   return maps;
 }
 
+/** Filter payloads sometimes include requester_name; GET ticket may nest requester.name. */
+function requesterNameFrom(rec: Record<string, unknown>): string {
+  if (typeof rec.requester_name === 'string' && rec.requester_name.trim()) return rec.requester_name.trim();
+  const requester = asRecord(rec.requester);
+  return String(requester.name || requester.full_name || '').trim();
+}
+
+/** undefined = field absent; null = present but empty (unassigned). */
+function optionalAgentId(rec: Record<string, unknown>): number | null | undefined {
+  const key = 'responder_id' in rec ? 'responder_id' : 'agent_id' in rec ? 'agent_id' : null;
+  if (!key) return undefined;
+  const raw = rec[key];
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function ticketUnassigned(ticket: ApiTicket): boolean | null {
+  if (ticket.responderId === undefined) return null;
+  return ticket.responderId == null;
+}
+
+export function ticketEscalated(ticket: ApiTicket): boolean {
+  return !!(ticket.is_escalated || ticket.fr_escalated);
+}
+
 export function asApiTicket(raw: unknown): ApiTicket | null {
   const rec = asRecord(raw);
   const id = Number(rec.id);
@@ -105,8 +137,11 @@ export function asApiTicket(raw: unknown): ApiTicket | null {
     updated_at: rec.updated_at as string | undefined,
     subject: rec.subject as string | undefined,
     due_by: rec.due_by as string | null | undefined,
-    is_escalated: Boolean(rec.is_escalated),
-    fr_escalated: Boolean(rec.fr_escalated),
+    is_escalated: rec.is_escalated == null ? undefined : Boolean(rec.is_escalated),
+    fr_escalated: rec.fr_escalated == null ? undefined : Boolean(rec.fr_escalated),
+    priority: parsePriority(rec.priority as string | number | null | undefined),
+    responderId: optionalAgentId(rec),
+    requesterName: requesterNameFrom(rec) || undefined,
   };
 }
 
@@ -166,6 +201,8 @@ export function ticketToReportable(
 ): Reportable {
   const updated = parseIso(ticket.updated_at);
   const created = parseIso(ticket.created_at);
+  const due = parseIso(ticket.due_by);
+  const subject = ticket.subject || '';
   return {
     status: statusLabel(ticket.status, maps),
     idleDays: idleFromUpdated(updated, created, now),
@@ -173,8 +210,15 @@ export function ticketToReportable(
     updatedKey: dateKey(updated),
     startIn: null,
     progress: { pct: null },
-    kind: '—',
+    kind: employeeKind(subject),
     href,
-    label: ticket.subject || `Ticket #${ticket.id}`,
+    label: sanitizeTitle(subject) || `Ticket #${ticket.id}`,
+    subject,
+    createdDays: ageDays(created, now),
+    dueIn: daysUntil(due, now),
+    priority: ticket.priority ?? null,
+    unassigned: ticketUnassigned(ticket),
+    escalated: ticketEscalated(ticket),
+    initiator: ticket.requesterName || '',
   };
 }

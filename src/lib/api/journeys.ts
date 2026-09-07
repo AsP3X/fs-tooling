@@ -1,8 +1,9 @@
 // Human: Journey / onboarding API helpers — custom start dates and child-ticket progress.
 // Agent: READS /api/v2/journeys/requests and /api/v2/onboarding_requests/{id}/tickets. Start prefers *date*/start/joining fields, then title.
 
-import { dateKey, parseStartDate } from '../dates';
+import { ageDays, dateKey, parseStartDate } from '../dates';
 import { MS_DAY } from '../constants';
+import { employeeKind, sanitizeTitle } from '../text';
 import type { Progress, Reportable } from '../types';
 import { apiRequest, asArray, asRecord } from './http';
 
@@ -13,6 +14,7 @@ export interface ApiJourney {
   title?: string;
   created_at?: string;
   updated_at?: string;
+  initiatorName?: string;
   initiator_data?: { custom_fields?: Record<string, unknown> };
 }
 
@@ -45,6 +47,16 @@ export function startFromCustomFields(fields: Record<string, unknown> | undefine
   return null;
 }
 
+/** Prefer initiator_data.name, then a string/object initiator field. */
+function initiatorNameFrom(rec: Record<string, unknown>): string {
+  const data = asRecord(rec.initiator_data);
+  const fromData = String(data.name || data.full_name || data.display_name || '').trim();
+  if (fromData) return fromData;
+  if (typeof rec.initiator === 'string') return rec.initiator.trim();
+  const obj = asRecord(rec.initiator);
+  return String(obj.name || obj.full_name || obj.display_name || '').trim();
+}
+
 export function asApiJourney(raw: unknown): ApiJourney | null {
   const rec = asRecord(raw);
   const id = Number(rec.id ?? rec.display_id);
@@ -57,6 +69,7 @@ export function asApiJourney(raw: unknown): ApiJourney | null {
     title: rec.title != null ? String(rec.title) : undefined,
     created_at: rec.created_at as string | undefined,
     updated_at: rec.updated_at as string | undefined,
+    initiatorName: initiatorNameFrom(rec) || undefined,
     initiator_data: { custom_fields: asRecord(initiator.custom_fields) as Record<string, unknown> },
   };
 }
@@ -125,6 +138,8 @@ export function journeyToReportable(
   const idleDays = idleSrc && !Number.isNaN(idleSrc.getTime()) ? (now - idleSrc.getTime()) / MS_DAY : null;
   const startIn = start ? (start.getTime() - now) / MS_DAY : null;
   const status = journey.status ? String(journey.status).replace(/_/g, ' ') : '—';
+  const title = journey.title || '';
+  const createdOk = created && !Number.isNaN(created.getTime()) ? created : null;
   return {
     status,
     idleDays,
@@ -132,8 +147,11 @@ export function journeyToReportable(
     updatedKey: dateKey(idleSrc && !Number.isNaN(idleSrc.getTime()) ? idleSrc : null),
     startIn,
     progress,
-    kind: '—',
+    kind: employeeKind(title),
     href,
-    label: journey.title || `Journey #${journey.display_id || journey.id}`,
+    label: sanitizeTitle(title) || `Journey #${journey.display_id || journey.id}`,
+    subject: title,
+    initiator: journey.initiatorName || '',
+    createdDays: ageDays(createdOk, now),
   };
 }

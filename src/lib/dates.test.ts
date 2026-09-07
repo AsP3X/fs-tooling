@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { civilDate, dateKey, formatStart, parseStartDate, parseStartInput, parseTicketDate, prettyStart } from './dates';
+import { ageDays, civilDate, dateKey, daysUntil, formatStart, parseStartDate, parseStartInput, parseTicketDate, prettyStart } from './dates';
+
+describe('ageDays / daysUntil', () => {
+  const now = Date.UTC(2026, 8, 4, 12, 0, 0);
+
+  it('returns null for missing dates', () => {
+    expect(ageDays(null, now)).toBeNull();
+    expect(daysUntil(null, now)).toBeNull();
+  });
+
+  it('is positive in the past for age and negative for until', () => {
+    const past = new Date(now - 2 * 86400000);
+    expect(ageDays(past, now)).toBeCloseTo(2, 5);
+    expect(daysUntil(past, now)).toBeCloseTo(-2, 5);
+  });
+});
 
 describe('civilDate', () => {
   it('clamps overflow days to the last day of the month', () => {

@@ -1,4 +1,4 @@
-// Human: AND/OR matching for idle age, status tags, start dates, progress, and start-within.
+// Human: AND/OR matching. Prefer page.filters (ordered colored rules); else the legacy live recipe.
 // Agent: PURE. When page.filters is set, CALLS firstMatchingFilter (order + color). Else uses the legacy live recipe so old tests/payloads still work. Date range is not part of highlight matching.
 
 import { firstMatchingFilter } from './filters';

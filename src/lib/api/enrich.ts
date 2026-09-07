@@ -1,16 +1,17 @@
 // Human: Overlay Freshservice API fields onto scraped rows; off-page matches for Open marked / stats; date-range overlay rows.
 // Agent: CALLS tickets/journeys APIs when a key works. Falls back to DOM on 401/empty. Caches ~30s unless force. Range listing does not change highlight matching.
 
-import { dateKey } from '../dates';
+import { ageDays, dateKey, daysUntil } from '../dates';
 import { itemMatches } from '../match';
 import { rangeActive, rangeModeFor, selectRangeRows } from '../range';
 import { getApiKey } from '../secrets';
 import { getModuleId, page } from '../state';
+import { employeeKind } from '../text';
 import type { PageSettings, Reportable, RowItem } from '../types';
 import { journeyHrefFor, parseRecordRef, ticketHrefFor } from './ids';
 import { fetchJourney, fetchJourneyList, fetchOnboardingChildren, journeyToReportable, progressFromChildTickets, startFromCustomFields, type ApiJourney } from './journeys';
 import { buildUpdatedRangeQuery } from './query';
-import { fetchTicket, fetchTicketsByIds, filterTickets, filterTicketsQuery, getStatusMaps, idleFromUpdated, parseIso, statusLabel, ticketToReportable, type ApiTicket, type StatusMaps } from './tickets';
+import { fetchTicket, fetchTicketsByIds, filterTickets, filterTicketsQuery, getStatusMaps, idleFromUpdated, parseIso, statusLabel, ticketEscalated, ticketToReportable, ticketUnassigned, type ApiTicket, type StatusMaps } from './tickets';
 
 const TTL = 30_000;
 const ticketCache = new Map<number, { at: number; ticket: ApiTicket }>();
@@ -46,6 +47,9 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): P
 function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now: number): RowItem {
   const updated = parseIso(ticket.updated_at) || item.updated;
   const created = parseIso(ticket.created_at) || item.created;
+  const due = parseIso(ticket.due_by);
+  const assigned = ticketUnassigned(ticket);
+  const hasEscalationFlag = ticket.is_escalated != null || ticket.fr_escalated != null;
   return {
     ...item,
     updated,
@@ -55,6 +59,13 @@ function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now:
     updatedKey: dateKey(updated) || item.updatedKey,
     recordId: ticket.id,
     fromApi: true,
+    subject: ticket.subject || item.subject,
+    createdDays: ageDays(created, now) ?? item.createdDays,
+    dueIn: daysUntil(due, now) ?? item.dueIn,
+    priority: ticket.priority ?? item.priority,
+    unassigned: assigned ?? item.unassigned,
+    escalated: hasEscalationFlag ? ticketEscalated(ticket) : item.escalated,
+    initiator: ticket.requesterName || item.initiator,
   };
 }
 
@@ -68,6 +79,7 @@ function mergeJourneyRow(item: RowItem, journey: ApiJourney, progressPct: number
   const progress = progressPct != null
     ? { done: null, total: null, pct: progressPct }
     : item.progress;
+  const title = journey.title || item.subject;
   return {
     ...item,
     start,
@@ -81,6 +93,10 @@ function mergeJourneyRow(item: RowItem, journey: ApiJourney, progressPct: number
     progress,
     recordId: journey.id,
     fromApi: true,
+    subject: title || item.subject,
+    initiator: item.initiator || journey.initiatorName || '',
+    kind: item.kind !== '—' ? item.kind : employeeKind(title || ''),
+    createdDays: ageDays(created, now) ?? item.createdDays,
   };
 }
 
@@ -141,7 +157,7 @@ async function offPageTickets(
 ): Promise<{ urls: string[]; records: Reportable[]; truncated: boolean }> {
   const key = JSON.stringify({
     d: cfg.days, s: cfg.statuses, m: cfg.matchMode,
-    f: (cfg.filters || []).map((r) => [r.id, r.enabled, r.matchMode, r.criteria]),
+    f: (cfg.filters || []).map((r) => [r.id, r.enabled, r.matchMode, r.invert, r.criteria]),
   });
   let tickets: ApiTicket[];
   if (filterCache && filterCache.key === key && cacheOk(filterCache.at, force)) {
@@ -152,9 +168,12 @@ async function offPageTickets(
   }
   const extra = tickets.filter((t) => !visibleIds.has(t.id));
   const now = Date.now();
+  const records = extra
+    .map((t) => ticketToReportable(t, maps, now, ticketHrefFor(origin, t.id, sampleHref)))
+    .filter((rec) => itemMatches(rec, cfg, 'tickets'));
   return {
-    urls: extra.map((t) => ticketHrefFor(origin, t.id, sampleHref)),
-    records: extra.map((t) => ticketToReportable(t, maps, now, ticketHrefFor(origin, t.id, sampleHref))),
+    urls: records.map((r) => r.href).filter((href): href is string => !!href),
+    records,
     truncated: tickets.length >= 500,
   };
 }

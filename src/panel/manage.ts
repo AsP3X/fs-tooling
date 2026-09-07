@@ -1,12 +1,11 @@
 // Human: Side filter dialog — ordered colored rules. Saving a default forks a restorable custom copy.
 // Agent: READS page().filters. CALLS onChange with a new filters array. CALLS onLayout after editor size changes.
 
-import { formatStart, parseStartInput } from '../lib/dates';
-import { blankFilter, criteriaFor, forkFromBuiltin, isForkOfDefault, moveFilter, restoreFromSource } from '../lib/filters';
-import { collectRows } from '../lib/rows';
+import { blankFilter, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, restoreFromSource } from '../lib/filters';
 import { getModuleId, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
-import type { FilterCriteria, FilterRule, MatchMode } from '../lib/types';
+import type { FilterRule, MatchMode } from '../lib/types';
+import { groupSummary, mountCriterion } from './criteria';
 
 const SWATCHES = ['#e65100', '#c62828', '#6a1b9a', '#1565c0', '#2e7d32'];
 
@@ -22,6 +21,8 @@ export function initManage(
   }
 
   let editingId: string | null = null;
+  let seededId: string | null = null;
+  const openGroups = new Set<string>();
 
   const commit = (filters: FilterRule[]): void => {
     hooks.onChange(filters);
@@ -32,6 +33,17 @@ export function initManage(
     const moduleId = getModuleId();
     const forked = isForkOfDefault(rule);
     const fields = criteriaFor(moduleId);
+    if (seededId !== rule.id) {
+      const sameFork = !!rule.sourceId && rule.sourceId === seededId;
+      if (!sameFork) {
+        openGroups.clear();
+        CRITERION_GROUPS.forEach((g) => {
+          const ids = fields.filter((f) => f.group === g.id).map((f) => f.id);
+          if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age') openGroups.add(g.id);
+        });
+      }
+      seededId = rule.id;
+    }
     editor.classList.remove('hide');
     editor.innerHTML = `
       <span class="label">${rule.builtin ? 'Default filter' : 'Edit filter'}</span>
@@ -45,6 +57,8 @@ export function initManage(
           <button type="button" data-mode="or"${rule.matchMode !== 'and' ? ' class="on"' : ''}>Any</button>
         </div>
       </div>
+      <button type="button" class="chip${rule.invert ? ' on' : ''}" id="filterInvert">Invert</button>
+      <p class="hint">${rule.invert ? 'Paints rows that miss these rules.' : 'Paints rows that match these rules.'}</p>
       <div class="chips" id="filterSwatches">
         ${SWATCHES.map((c) => `<button type="button" class="swatch${c.toLowerCase() === rule.color.toLowerCase() ? ' on' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
         <input type="color" id="filterColor" value="${escapeHtml(rule.color)}" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
@@ -57,13 +71,36 @@ export function initManage(
       </div>`;
 
     const fieldsHost = editor.querySelector('#filterFields') as HTMLElement;
-    fields.forEach((spec) => {
-      const block = document.createElement('div');
-      block.className = 'editor-field';
-      mountCriterion(block, spec.id, rule.criteria, false, (patch) => {
-        patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
+    CRITERION_GROUPS.forEach((group) => {
+      const specs = fields.filter((f) => f.group === group.id);
+      if (!specs.length) return;
+      const box = document.createElement('div');
+      const open = openGroups.has(group.id);
+      box.className = `tagbox editor-group${open ? ' open' : ''}`;
+      const summary = groupSummary(specs.map((s) => s.id), rule.criteria);
+      box.innerHTML = `
+        <button type="button" class="tagbox-head" data-group="${group.id}">
+          <span class="label">${escapeHtml(group.label)}</span>
+          <span style="display:flex;align-items:center;gap:6px"><span class="tag-count">${escapeHtml(summary)}</span><span class="chev">▸</span></span>
+        </button>
+        <div class="tagbox-body"></div>
+        ${group.hint && open ? `<p class="hint">${escapeHtml(group.hint)}</p>` : ''}`;
+      const body = box.querySelector('.tagbox-body') as HTMLElement;
+      specs.forEach((spec) => {
+        const block = document.createElement('div');
+        block.className = 'editor-field';
+        mountCriterion(block, spec.id, rule.criteria, moduleId, (patch) => {
+          patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
+        });
+        body.appendChild(block);
       });
-      fieldsHost.appendChild(block);
+      box.querySelector('.tagbox-head')?.addEventListener('click', () => {
+        if (openGroups.has(group.id)) openGroups.delete(group.id);
+        else openGroups.add(group.id);
+        const latest = (page().filters || []).find((r) => r.id === rule.id) || rule;
+        renderEditor(latest);
+      });
+      fieldsHost.appendChild(box);
     });
 
     const nameInput = editor.querySelector('#filterName') as HTMLInputElement | null;
@@ -78,6 +115,9 @@ export function initManage(
         patchRule(rule.id, { matchMode: mode });
       });
     });
+    editor.querySelector('#filterInvert')?.addEventListener('click', () => {
+      patchRule(rule.id, { invert: !rule.invert });
+    });
     editor.querySelectorAll('#filterSwatches .swatch').forEach((btn) => {
       btn.addEventListener('click', () => patchRule(rule.id, { color: (btn as HTMLElement).dataset.color || rule.color }));
     });
@@ -86,6 +126,7 @@ export function initManage(
     });
     editor.querySelector('#closeEditor')?.addEventListener('click', () => {
       editingId = null;
+      seededId = null;
       editor.classList.add('hide');
       editor.innerHTML = '';
       editor.removeAttribute('data-editing');
@@ -117,7 +158,7 @@ export function initManage(
     const list = page().filters || [];
     const cur = list.find((r) => r.id === id);
     if (!cur) return;
-    const content = 'name' in partial || 'criteria' in partial || 'matchMode' in partial || 'color' in partial;
+    const content = 'name' in partial || 'criteria' in partial || 'matchMode' in partial || 'color' in partial || 'invert' in partial;
     if (cur.builtin && content) {
       const fork = forkFromBuiltin({
         ...cur,
@@ -137,7 +178,7 @@ export function initManage(
       <div class="filter-row" data-id="${escapeHtml(rule.id)}">
         <span class="filter-swatch" style="background:${escapeHtml(rule.color)}"></span>
         <span class="filter-name">${escapeHtml(rule.name)}</span>
-        ${rule.builtin ? '<span class="tag-count">Default</span>' : isForkOfDefault(rule) ? '<span class="tag-count">Custom</span>' : ''}
+        <span class="filter-tags">${rule.builtin ? '<span class="tag-count">Default</span>' : isForkOfDefault(rule) ? '<span class="tag-count">Custom</span>' : ''}${rule.invert ? '<span class="tag-count">Invert</span>' : ''}</span>
         <button type="button" class="icon-btn" data-act="up" ${i === 0 ? 'disabled' : ''} title="Higher priority">↑</button>
         <button type="button" class="icon-btn" data-act="down" ${i === filters.length - 1 ? 'disabled' : ''} title="Lower priority">↓</button>
         <button type="button" class="toggle${rule.enabled ? ' on' : ''}" data-act="on" title="Active"><i></i></button>
@@ -160,12 +201,13 @@ export function initManage(
       const rule = filters.find((r) => r.id === editingId);
       if (!rule) {
         editingId = null;
+        seededId = null;
         editor.classList.add('hide');
         editor.innerHTML = '';
         editor.removeAttribute('data-editing');
       } else {
         const active = shadow.activeElement;
-        const typing = !!(active && editor.contains(active) && active instanceof HTMLInputElement);
+        const typing = !!(active && editor.contains(active) && active instanceof HTMLInputElement && active.type === 'text');
         if (!typing || editor.dataset.editing !== rule.id) {
           renderEditor(rule);
           editor.dataset.editing = rule.id;
@@ -186,131 +228,4 @@ export function initManage(
   };
 
   return { sync };
-}
-
-function mountCriterion(
-  host: HTMLElement,
-  id: string,
-  criteria: FilterCriteria,
-  locked: boolean,
-  onPatch: (patch: FilterCriteria) => void,
-): void {
-  const disabled = locked ? 'disabled' : '';
-  if (id === 'idleDays') {
-    const days = typeof criteria.idleDays === 'number' ? criteria.idleDays : 6;
-    const on = criteria.idleDays != null;
-    host.innerHTML = `
-      <div class="row-between"><span class="label">Idle age</span>
-        <button type="button" class="chip${on ? ' on' : ''}" data-idle-off ${disabled}>${on ? `${days}d` : 'Off'}</button>
-      </div>
-      <input type="range" min="1" max="45" step="1" value="${days}" ${disabled} />`;
-    const idleChip = host.querySelector('[data-idle-off]');
-    const idleRange = host.querySelector('input');
-    idleChip?.addEventListener('click', () => {
-      onPatch({ idleDays: on ? null : days });
-    });
-    idleRange?.addEventListener('input', (e) => {
-      const value = Number((e.target as HTMLInputElement).value);
-      if (idleChip) idleChip.textContent = `${value}d`;
-    });
-    idleRange?.addEventListener('change', (e) => {
-      onPatch({ idleDays: Number((e.target as HTMLInputElement).value) });
-    });
-    return;
-  }
-  if (id === 'statuses') {
-    const tags = Array.isArray(criteria.statuses) ? criteria.statuses : [];
-    const hints = [...new Set(collectRows().map((r) => r.status).filter((s) => s && s !== '—'))]
-      .filter((s) => !tags.some((t) => t.toLowerCase() === s.toLowerCase()));
-    host.innerHTML = `
-      <span class="label">Statuses</span>
-      <div class="tags">${tags.map((s) => `<span class="tag">${escapeHtml(s)}${locked ? '' : `<button type="button" data-remove="${escapeHtml(s)}">×</button>`}</span>`).join('')}</div>
-      ${locked ? '' : `<input type="text" placeholder="Add status · Enter" />`}
-      <div class="chips">${hints.map((s) => `<button type="button" class="chip" data-add="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}</div>`;
-    host.querySelectorAll('[data-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const remove = (btn as HTMLElement).dataset.remove || '';
-        onPatch({ statuses: tags.filter((s) => s.toLowerCase() !== remove.toLowerCase()) });
-      });
-    });
-    host.querySelectorAll('[data-add]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const add = (btn as HTMLElement).dataset.add || '';
-        if (!add || tags.some((s) => s.toLowerCase() === add.toLowerCase())) return;
-        onPatch({ statuses: [...tags, add] });
-      });
-    });
-    const input = host.querySelector('input');
-    input?.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key !== 'Enter' && e.key !== ',') return;
-      e.preventDefault();
-      const add = input.value.replace(/\s+/g, ' ').trim();
-      input.value = '';
-      if (!add || tags.some((s) => s.toLowerCase() === add.toLowerCase())) return;
-      onPatch({ statuses: [...tags, add] });
-    });
-    return;
-  }
-  if (id === 'startDates') {
-    const tags = Array.isArray(criteria.startDates) ? criteria.startDates : [];
-    host.innerHTML = `
-      <span class="label">Start dates</span>
-      <div class="tags">${tags.map((s) => `<span class="tag">${escapeHtml(formatStart(s))}${locked ? '' : `<button type="button" data-remove="${escapeHtml(s)}">×</button>`}</span>`).join('')}</div>
-      ${locked ? '' : `<input type="text" placeholder="14-09-2026 · Enter" />`}`;
-    host.querySelectorAll('[data-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const remove = (btn as HTMLElement).dataset.remove || '';
-        onPatch({ startDates: tags.filter((s) => s !== remove) });
-      });
-    });
-    const input = host.querySelector('input');
-    input?.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key !== 'Enter' && e.key !== ',') return;
-      e.preventDefault();
-      const key = parseStartInput(input.value);
-      input.value = '';
-      if (!key || tags.includes(key)) return;
-      onPatch({ startDates: [...tags, key] });
-    });
-    return;
-  }
-  if (id === 'maxProgress') {
-    const max = typeof criteria.maxProgress === 'number' ? criteria.maxProgress : null;
-    host.innerHTML = `
-      <div class="row-between"><span class="label">Max child progress</span><b>${max == null ? 'off' : `${max}%`}</b></div>
-      <div class="chips">
-        <button type="button" class="chip${max == null ? ' on' : ''}" data-prog="" ${locked ? 'disabled' : ''}>Off</button>
-        <button type="button" class="chip${max === 25 ? ' on' : ''}" data-prog="25" ${locked ? 'disabled' : ''}>≤25%</button>
-        <button type="button" class="chip${max === 40 ? ' on' : ''}" data-prog="40" ${locked ? 'disabled' : ''}>≤40%</button>
-        <button type="button" class="chip${max === 60 ? ' on' : ''}" data-prog="60" ${locked ? 'disabled' : ''}>≤60%</button>
-      </div>`;
-    host.querySelectorAll('[data-prog]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const raw = (btn as HTMLElement).dataset.prog;
-        onPatch({ maxProgress: raw === '' ? null : Number(raw) });
-      });
-    });
-    return;
-  }
-  if (id === 'startWithin') {
-    const within = typeof criteria.startWithin === 'number' ? criteria.startWithin : null;
-    host.innerHTML = `
-      <div class="row-between"><span class="label">Start within</span><b>${within == null ? 'off' : `${within}d`}</b></div>
-      <div class="chips">
-        <button type="button" class="chip${within == null ? ' on' : ''}" data-start="" ${locked ? 'disabled' : ''}>Off</button>
-        <button type="button" class="chip${within === 3 ? ' on' : ''}" data-start="3" ${locked ? 'disabled' : ''}>3d</button>
-        <button type="button" class="chip${within === 7 ? ' on' : ''}" data-start="7" ${locked ? 'disabled' : ''}>7d</button>
-        <button type="button" class="chip${within === 14 ? ' on' : ''}" data-start="14" ${locked ? 'disabled' : ''}>14d</button>
-      </div>`;
-    host.querySelectorAll('[data-start]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const raw = (btn as HTMLElement).dataset.start;
-        onPatch({ startWithin: raw === '' ? null : Number(raw) });
-      });
-    });
-    return;
-  }
-  host.innerHTML = `<p class="hint">${escapeHtml(id)} is registered but has no editor yet.</p>`;
 }

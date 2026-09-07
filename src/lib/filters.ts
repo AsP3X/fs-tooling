@@ -1,13 +1,15 @@
 // Human: Ordered, colored highlight filters. First enabled match wins. Criteria are registered so new pages/dimensions can plug in.
-// Agent: PURE. mergeFilterList READS builtins + stored rules. ruleMatches CALLS registered criterion.evaluate. Empty/unknown criteria are skipped.
+// Agent: PURE. mergeFilterList READS builtins + stored rules. ruleMatches CALLS registered criterion.evaluate. Empty/unknown criteria are skipped. invert flips a hit after at least one dimension is active.
 
 import type { FilterCriteria, FilterRule, Matchable, MatchMode, ModuleId, PageSettings, Preset } from './types';
 
 export type FilterModule = ModuleId | 'global';
+export type CriterionGroupId = 'age' | 'status' | 'people' | 'ticket' | 'schedule' | 'text';
 
 export interface CriterionDef {
   id: string;
   modules: FilterModule[];
+  group: CriterionGroupId;
   evaluate: (item: Matchable, criteria: FilterCriteria) => boolean | null;
 }
 
@@ -17,6 +19,15 @@ export interface FilterPageDef {
   defaultColor: string;
   builtins: () => FilterRule[];
 }
+
+export const CRITERION_GROUPS: Array<{ id: CriterionGroupId; label: string; hint?: string }> = [
+  { id: 'age', label: 'Age' },
+  { id: 'status', label: 'Status' },
+  { id: 'people', label: 'People' },
+  { id: 'ticket', label: 'Ticket', hint: 'Uses list columns when visible, or the API when a key is saved.' },
+  { id: 'schedule', label: 'Start & progress' },
+  { id: 'text', label: 'Subject' },
+];
 
 const criteria: CriterionDef[] = [];
 const pages = new Map<ModuleId, FilterPageDef>();
@@ -39,16 +50,65 @@ export function criteriaFor(moduleId: ModuleId): CriterionDef[] {
   return criteria.filter((c) => c.modules.includes('global') || c.modules.includes(moduleId));
 }
 
-function asFiniteNumber(value: unknown): number | null {
+export function asFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function asStringList(value: unknown): string[] {
+export function asStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map((v) => String(v)).filter(Boolean) : [];
+}
+
+export function asNumberList(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.map(Number).filter((n) => Number.isFinite(n))
+    : [];
 }
 
 function asMatchMode(value: unknown): MatchMode {
   return value === 'and' ? 'and' : 'or';
+}
+
+/** Inclusive min/max. Swaps inverted bounds. Null/empty bounds skip the dimension. */
+export function inBand(value: number | null | undefined, min: unknown, max: unknown): boolean | null {
+  let lo = asFiniteNumber(min);
+  let hi = asFiniteNumber(max);
+  if (lo == null && hi == null) return null;
+  if (value == null || !Number.isFinite(value)) return false;
+  if (lo != null && hi != null && lo > hi) {
+    const swap = lo;
+    lo = hi;
+    hi = swap;
+  }
+  if (lo != null && value < lo) return false;
+  if (hi != null && value > hi) return false;
+  return true;
+}
+
+function textHasPhrase(item: Matchable, phrase: string): boolean {
+  const p = phrase.toLowerCase();
+  return String(item.subject || '').toLowerCase().includes(p)
+    || String(item.label || '').toLowerCase().includes(p);
+}
+
+/** True when the editor should treat this dimension as on (badge + open group). */
+export function criterionActive(id: string, c: FilterCriteria): boolean {
+  switch (id) {
+    case 'idleDays': return c.idleDays != null || c.idleDaysMax != null;
+    case 'createdDays': return c.createdDays != null || c.createdDaysMax != null;
+    case 'statuses': return asStringList(c.statuses).length > 0;
+    case 'excludeStatuses': return asStringList(c.excludeStatuses).length > 0;
+    case 'kinds': return asStringList(c.kinds).length > 0;
+    case 'initiators': return asStringList(c.initiators).length > 0;
+    case 'unassigned': return c.unassigned === true;
+    case 'priorities': return asNumberList(c.priorities).length > 0;
+    case 'dueWithin': return asFiniteNumber(c.dueWithin) != null;
+    case 'escalated': return c.escalated === true;
+    case 'startDates': return asStringList(c.startDates).length > 0;
+    case 'startWithin': return c.startPassed === true || asFiniteNumber(c.startWithin) != null;
+    case 'maxProgress': return asFiniteNumber(c.maxProgress) != null || asFiniteNumber(c.minProgress) != null;
+    case 'subjectIncludes': return asStringList(c.subjectIncludes).length > 0;
+    default: return false;
+  }
 }
 
 export function asColor(value: unknown, fallback: string): string {
@@ -63,16 +123,21 @@ export function asColor(value: unknown, fallback: string): string {
 registerCriterion({
   id: 'idleDays',
   modules: ['tickets', 'journeys'],
-  evaluate: (item, c) => {
-    const days = asFiniteNumber(c.idleDays);
-    if (days == null) return null;
-    return item.idleDays != null && item.idleDays >= days;
-  },
+  group: 'age',
+  evaluate: (item, c) => inBand(item.idleDays, c.idleDays, c.idleDaysMax),
+});
+
+registerCriterion({
+  id: 'createdDays',
+  modules: ['tickets', 'journeys'],
+  group: 'age',
+  evaluate: (item, c) => inBand(item.createdDays ?? null, c.createdDays, c.createdDaysMax),
 });
 
 registerCriterion({
   id: 'statuses',
   modules: ['tickets', 'journeys'],
+  group: 'status',
   evaluate: (item, c) => {
     const tags = asStringList(c.statuses).map((s) => s.toLowerCase());
     if (!tags.length) return null;
@@ -81,8 +146,86 @@ registerCriterion({
 });
 
 registerCriterion({
+  id: 'excludeStatuses',
+  modules: ['tickets', 'journeys'],
+  group: 'status',
+  evaluate: (item, c) => {
+    const tags = asStringList(c.excludeStatuses).map((s) => s.toLowerCase());
+    if (!tags.length) return null;
+    return !tags.includes(String(item.status).toLowerCase());
+  },
+});
+
+registerCriterion({
+  id: 'kinds',
+  modules: ['journeys'],
+  group: 'people',
+  evaluate: (item, c) => {
+    const tags = asStringList(c.kinds).map((s) => s.toLowerCase());
+    if (!tags.length) return null;
+    return tags.includes(String(item.kind || '').toLowerCase());
+  },
+});
+
+registerCriterion({
+  id: 'initiators',
+  modules: ['tickets', 'journeys'],
+  group: 'people',
+  evaluate: (item, c) => {
+    const tags = asStringList(c.initiators).map((s) => s.toLowerCase());
+    if (!tags.length) return null;
+    return tags.includes(String(item.initiator || '').toLowerCase());
+  },
+});
+
+registerCriterion({
+  id: 'unassigned',
+  modules: ['tickets'],
+  group: 'people',
+  evaluate: (item, c) => {
+    if (c.unassigned !== true) return null;
+    return item.unassigned === true;
+  },
+});
+
+registerCriterion({
+  id: 'priorities',
+  modules: ['tickets'],
+  group: 'ticket',
+  evaluate: (item, c) => {
+    const ids = asNumberList(c.priorities);
+    if (!ids.length) return null;
+    return item.priority != null && ids.includes(item.priority);
+  },
+});
+
+registerCriterion({
+  id: 'dueWithin',
+  modules: ['tickets'],
+  group: 'ticket',
+  evaluate: (item, c) => {
+    const within = asFiniteNumber(c.dueWithin);
+    if (within == null) return null;
+    if (item.dueIn == null) return false;
+    if (within <= 0) return item.dueIn < 0;
+    return item.dueIn <= within;
+  },
+});
+
+registerCriterion({
+  id: 'escalated',
+  modules: ['tickets'],
+  group: 'ticket',
+  evaluate: (item, c) => {
+    if (c.escalated !== true) return null;
+    return item.escalated === true;
+  },
+});
+
+registerCriterion({
   id: 'startDates',
   modules: ['journeys'],
+  group: 'schedule',
   evaluate: (item, c) => {
     const tags = asStringList(c.startDates);
     if (!tags.length) return null;
@@ -91,30 +234,45 @@ registerCriterion({
 });
 
 registerCriterion({
-  id: 'maxProgress',
-  modules: ['journeys'],
-  evaluate: (item, c) => {
-    const max = asFiniteNumber(c.maxProgress);
-    if (max == null) return null;
-    return item.progress.pct != null && item.progress.pct <= max;
-  },
-});
-
-registerCriterion({
   id: 'startWithin',
   modules: ['journeys'],
+  group: 'schedule',
   evaluate: (item, c) => {
+    if (c.startPassed === true) return item.startIn != null && item.startIn <= 0;
     const within = asFiniteNumber(c.startWithin);
     if (within == null) return null;
     return item.startIn != null && item.startIn <= within;
   },
 });
 
-function makeRule(partial: Omit<FilterRule, 'builtin' | 'enabled'> & { builtin?: boolean; enabled?: boolean }): FilterRule {
+registerCriterion({
+  id: 'maxProgress',
+  modules: ['journeys'],
+  group: 'schedule',
+  evaluate: (item, c) => inBand(item.progress.pct, c.minProgress, c.maxProgress),
+});
+
+registerCriterion({
+  id: 'subjectIncludes',
+  modules: ['tickets', 'journeys'],
+  group: 'text',
+  evaluate: (item, c) => {
+    const phrases = asStringList(c.subjectIncludes).map((s) => s.toLowerCase());
+    if (!phrases.length) return null;
+    return phrases.some((p) => textHasPhrase(item, p));
+  },
+});
+
+function makeRule(partial: Omit<FilterRule, 'builtin' | 'enabled' | 'invert'> & {
+  builtin?: boolean;
+  enabled?: boolean;
+  invert?: boolean;
+}): FilterRule {
   return {
     builtin: false,
     enabled: false,
     ...partial,
+    invert: partial.invert === true,
     matchMode: asMatchMode(partial.matchMode),
     color: asColor(partial.color, '#e65100'),
     criteria: { ...(partial.criteria || {}) },
@@ -141,6 +299,22 @@ registerFilterPage({
     makeRule({
       id: 'w3p', name: '3rd party', builtin: true, color: '#1565c0', matchMode: 'and',
       criteria: { idleDays: 3, statuses: ['Waiting for third party'] },
+    }),
+    makeRule({
+      id: 'overdue', name: 'Overdue', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { dueWithin: 0 },
+    }),
+    makeRule({
+      id: 'unassigned', name: 'Unassigned', builtin: true, color: '#6a1b9a', matchMode: 'or',
+      criteria: { unassigned: true },
+    }),
+    makeRule({
+      id: 'urgent', name: 'Urgent', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { priorities: [4] },
+    }),
+    makeRule({
+      id: 'escalated', name: 'Escalated', builtin: true, color: '#e65100', matchMode: 'or',
+      criteria: { escalated: true },
     }),
   ],
 });
@@ -170,6 +344,14 @@ registerFilterPage({
       id: 'start-soon', name: 'Start ≤7d', builtin: true, color: '#2e7d32', matchMode: 'or',
       criteria: { idleDays: 1, startWithin: 7 },
     }),
+    makeRule({
+      id: 'internal', name: 'Internal', builtin: true, color: '#1565c0', matchMode: 'or',
+      criteria: { kinds: ['Internal'] },
+    }),
+    makeRule({
+      id: 'started', name: 'Started', builtin: true, color: '#2e7d32', matchMode: 'or',
+      criteria: { startPassed: true },
+    }),
   ],
 });
 
@@ -189,20 +371,36 @@ export function ruleMatches(
 ): boolean {
   const bag = rule.criteria || {};
   const andMode = rule.matchMode === 'and';
-  let any = false;
+  let active = false;
+  let matched = andMode;
   for (let i = 0; i < specs.length; i += 1) {
+    // Exclude is a hard cut, not an Any dimension (OR + "not Closed" would mark almost everything).
+    if (specs[i].id === 'excludeStatuses') continue;
     const result = specs[i].evaluate(item, bag);
     if (result == null) continue;
+    active = true;
     if (andMode) {
-      if (!result) return false;
-      any = true;
+      if (!result) {
+        matched = false;
+        break;
+      }
     } else if (result) {
-      return true;
-    } else {
-      any = true;
+      matched = true;
+      break;
     }
   }
-  return andMode ? any : false;
+  const excluded = asStringList(bag.excludeStatuses).map((s) => s.toLowerCase());
+  if (excluded.length) {
+    const allowed = !excluded.includes(String(item.status).toLowerCase());
+    if (!active) {
+      active = true;
+      matched = allowed;
+    } else {
+      matched = matched && allowed;
+    }
+  }
+  if (!active) return false;
+  return rule.invert ? !matched : matched;
 }
 
 export function enabledFilters(page: PageSettings): FilterRule[] {
@@ -238,6 +436,7 @@ function normalizeRule(raw: unknown, fallbackColor: string): FilterRule | null {
     name: name.slice(0, 40),
     builtin: rec.builtin === true,
     enabled: rec.enabled === true,
+    invert: rec.invert === true,
     color: asColor(rec.color, fallbackColor),
     matchMode: asMatchMode(rec.matchMode),
     criteria: { ...criteriaRaw },
@@ -410,6 +609,7 @@ export function duplicateFilter(rule: FilterRule): FilterRule {
     name: `${rule.name} copy`.slice(0, 40),
     builtin: false,
     enabled: true,
+    invert: rule.invert === true,
     sourceId: rule.builtin ? rule.id : (rule.sourceId || null),
     criteria: { ...rule.criteria },
   };

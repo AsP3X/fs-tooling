@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultPage } from '../constants';
-import { buildTicketFilterQuery, buildUpdatedRangeQuery, chunkIds, idleCutoffDate } from './query';
+import { buildRuleTicketQuery, buildTicketFilterQuery, buildUpdatedRangeQuery, chunkIds, idleCutoffDate } from './query';
 
 describe('idleCutoffDate', () => {
   it('formats UTC yyyy-mm-dd for N days ago', () => {
@@ -30,12 +30,61 @@ describe('buildTicketFilterQuery', () => {
   it('ORs each enabled filter query', () => {
     const cfg = defaultPage({
       filters: [
-        { id: 'a', name: 'A', builtin: false, enabled: true, color: '#e65100', matchMode: 'or', criteria: { idleDays: 6 } },
-        { id: 'b', name: 'B', builtin: false, enabled: true, color: '#1565c0', matchMode: 'or', criteria: { statuses: ['Pending'] } },
+        { id: 'a', name: 'A', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'or', criteria: { idleDays: 6 } },
+        { id: 'b', name: 'B', builtin: false, enabled: true, invert: false, color: '#1565c0', matchMode: 'or', criteria: { statuses: ['Pending'] } },
       ],
     });
     const q = buildTicketFilterQuery(cfg, names, now);
     expect(q).toBe("(updated_at:<'2026-08-29') OR (status:3)");
+  });
+
+  it('adds created, due, priority, and unassigned clauses', () => {
+    const q = buildRuleTicketQuery(
+      {
+        id: 'x', name: 'X', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'and',
+        criteria: { createdDays: 14, dueWithin: 0, priorities: [3, 4], unassigned: true },
+      },
+      names,
+      now,
+    );
+    expect(q).toContain("created_at:<'2026-08-21'");
+    expect(q).toContain("due_by:<'2026-09-04'");
+    expect(q).toContain('priority:3 OR priority:4');
+    expect(q).toContain('agent_id:null');
+  });
+
+  it('swaps inverted idle min/max in the query band', () => {
+    const swapped = buildRuleTicketQuery(
+      {
+        id: 'x', name: 'X', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'and',
+        criteria: { idleDays: 14, idleDaysMax: 6 },
+      },
+      names,
+      now,
+    );
+    const ordered = buildRuleTicketQuery(
+      {
+        id: 'y', name: 'Y', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'and',
+        criteria: { idleDays: 6, idleDaysMax: 14 },
+      },
+      names,
+      now,
+    );
+    expect(swapped).toBe(ordered);
+    expect(swapped).toContain("updated_at:<'2026-08-29'");
+    expect(swapped).toContain("updated_at:>'2026-08-21'");
+  });
+
+  it('omits inverted rules from the API query', () => {
+    const q = buildRuleTicketQuery(
+      {
+        id: 'x', name: 'X', builtin: false, enabled: true, invert: true, color: '#e65100', matchMode: 'or',
+        criteria: { idleDays: 6 },
+      },
+      names,
+      now,
+    );
+    expect(q).toBe('');
   });
 
   it('does not fold the date-range overlay into idle/status matching', () => {

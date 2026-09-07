@@ -22,6 +22,12 @@ function row(partial: Partial<RowItem> & { row: HTMLTableRowElement }): RowItem 
     label: '',
     recordId: null,
     fromApi: false,
+    subject: '',
+    createdDays: null,
+    dueIn: null,
+    priority: null,
+    unassigned: null,
+    escalated: null,
     ...partial,
   };
 }

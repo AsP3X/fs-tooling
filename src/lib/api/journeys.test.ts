@@ -20,6 +20,8 @@ describe('journeyToReportable', () => {
     );
     expect(rec.startKey).toBe('2026-09-14');
     expect(rec.label).toContain('Onboarding');
+    expect(rec.kind).toBe('Internal');
+    expect(rec.subject).toContain('Start 14-09-2026');
   });
 });
 

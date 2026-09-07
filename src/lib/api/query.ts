@@ -1,17 +1,25 @@
 // Human: Build Freshservice ticket filter query strings from panel match settings.
-// Agent: PURE. Date operator :< is inclusive LTE per FS docs. Unknown status names are dropped.
+// Agent: PURE. Date operator :< is inclusive LTE per FS docs. Unknown status names are dropped. Inverted rules are omitted (FS filter cannot express NOT).
 
 import { MS_DAY } from '../constants';
-import { enabledFilters } from '../filters';
+import { asFiniteNumber, asNumberList, enabledFilters } from '../filters';
 import { normalizeRange, shiftDateKey } from '../range';
 import type { FilterRule, MatchMode, PageSettings } from '../types';
 
-export function idleCutoffDate(days: number, now: number = Date.now()): string {
-  const d = new Date(now - days * MS_DAY);
+function utcDateKey(ms: number): string {
+  const d = new Date(ms);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+export function idleCutoffDate(days: number, now: number = Date.now()): string {
+  return utcDateKey(now - days * MS_DAY);
+}
+
+export function futureCutoffDate(days: number, now: number = Date.now()): string {
+  return utcDateKey(now + days * MS_DAY);
 }
 
 function statusClause(statuses: unknown, nameToId: Map<string, number>): string {
@@ -28,15 +36,56 @@ function combineIdleAndStatus(idle: string | null, statusPart: string, matchMode
   return idle || statusPart;
 }
 
+function combineDims(dims: string[], matchMode: MatchMode): string {
+  const parts = dims.filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return parts[0];
+  if (matchMode === 'and') {
+    return parts.map((p) => (/\sOR\s|\sAND\s/.test(p) ? `(${p})` : p)).join(' AND ');
+  }
+  return parts.map((p) => (/\sAND\s/.test(p) ? `(${p})` : p)).join(' OR ');
+}
+
+function dateBand(field: 'updated_at' | 'created_at', minDays: number | null, maxDays: number | null, now: number): string {
+  let lo = minDays;
+  let hi = maxDays;
+  if (lo != null && hi != null && lo > hi) {
+    const swap = lo;
+    lo = hi;
+    hi = swap;
+  }
+  const parts: string[] = [];
+  if (lo != null) parts.push(`${field}:<'${idleCutoffDate(lo, now)}'`);
+  if (hi != null) parts.push(`${field}:>'${idleCutoffDate(hi, now)}'`);
+  return parts.join(' AND ');
+}
+
+function dueClause(within: number, now: number): string {
+  if (within <= 0) return `due_by:<'${idleCutoffDate(0, now)}'`;
+  const end = shiftDateKey(futureCutoffDate(within, now), 1) || futureCutoffDate(within, now);
+  return `due_by:<'${end}'`;
+}
+
 export function buildRuleTicketQuery(
   rule: FilterRule,
   nameToId: Map<string, number>,
   now: number = Date.now(),
 ): string {
-  const days = typeof rule.criteria.idleDays === 'number' ? rule.criteria.idleDays : null;
-  const idle = days != null ? `updated_at:<'${idleCutoffDate(days, now)}'` : null;
-  const statusPart = statusClause(rule.criteria.statuses, nameToId);
-  return combineIdleAndStatus(idle, statusPart, rule.matchMode === 'and' ? 'and' : 'or');
+  if (rule.invert) return '';
+  const c = rule.criteria || {};
+  const dims: string[] = [];
+  const idle = dateBand('updated_at', asFiniteNumber(c.idleDays), asFiniteNumber(c.idleDaysMax), now);
+  if (idle) dims.push(idle);
+  const created = dateBand('created_at', asFiniteNumber(c.createdDays), asFiniteNumber(c.createdDaysMax), now);
+  if (created) dims.push(created);
+  const statusPart = statusClause(c.statuses, nameToId);
+  if (statusPart) dims.push(statusPart);
+  const prios = asNumberList(c.priorities).filter((n) => n >= 1 && n <= 4);
+  if (prios.length) dims.push(prios.map((id) => `priority:${id}`).join(' OR '));
+  const due = asFiniteNumber(c.dueWithin);
+  if (due != null) dims.push(dueClause(due, now));
+  if (c.unassigned === true) dims.push('agent_id:null');
+  return combineDims(dims, rule.matchMode === 'and' ? 'and' : 'or');
 }
 
 export function buildTicketFilterQuery(

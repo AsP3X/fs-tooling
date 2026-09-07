@@ -36,6 +36,28 @@ describe('collectRows', () => {
     expect(row.href).toContain('/a/tickets/42');
     expect(row.label).toContain('Onboarding ·');
     expect(row.idleDays).toBeCloseTo(3, 5);
+    expect(row.createdDays).toBeCloseTo(15, 5);
+    expect(row.subject).toContain('Internal employee');
+  });
+
+  it('reads due date, priority, and unassigned agent', () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="subject"><a class="subject-cell" href="/a/tickets/7">Hi</a></td>
+            <td data-name="created_at_date"><span data-test-id="date-cell" title="20 Aug, 2026, 12:00">20 Aug</span></td>
+            <td data-name="due_by"><span data-test-id="date-cell" title="01 Sep, 2026, 12:00">1 Sep</span></td>
+            <td data-name="priority"><span title="Urgent">Urgent</span></td>
+            <td data-name="responder"></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const [row] = collectRows(document, NOW);
+    expect(row.priority).toBe(4);
+    expect(row.unassigned).toBe(true);
+    expect(row.dueIn).toBeCloseTo(-3, 0);
   });
 
   it('prefers status-age "since N days" over Updated', () => {

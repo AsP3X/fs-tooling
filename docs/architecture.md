@@ -81,8 +81,9 @@ Editing a default and saving forks a custom copy (`sourceId`) in the same slot; 
 
 `itemMatches` in `src/lib/match.ts`:
 
-- **OR:** idle age **or** a selected status **or** a selected start date (plus optional progress / start-within).
-- **AND:** idle age **and** each *non-empty* tag list. Empty status or start-date lists are skipped, not treated as “match nothing”.
+- **OR / AND** still skip empty dimensions. **Exclude statuses** always cuts those statuses (it is not an Any dimension). **Invert** paints rows that miss the rule instead of those that match.
+- Tickets: idle band, created age, include/exclude status, requester, subject phrase, priority, due / overdue, escalated, unassigned.
+- Journeys: the same age/status/subject rules, plus kind (Internal/External), initiator, start dates, start already passed or within N days, and a child-progress band.
 - **Date range** does not participate. It only fills the Range results overlay.
 
 Journey start dates come from the subject (`Start` / `Starting` + day-first date) on the page, and from initiator custom fields when the API key works. Do not use Updated/Created cells for that column.

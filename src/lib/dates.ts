@@ -1,7 +1,7 @@
 // Human: Date parsing for Freshservice cell titles and journey "Start DD-MM-YYYY" title fragments.
 // Agent: PURE. parseTicketDate is day-first for numeric dates; parseStartDate only matches Start/Starting in the title.
 
-import { MONTHS } from './constants';
+import { MONTHS, MS_DAY } from './constants';
 
 export function civilDate(year: number, month1to12: number, day: number): Date | null {
   const y = Number(year);
@@ -19,6 +19,18 @@ export function dateKey(d: Date | null): string | null {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** Whole days from `from` until `now`. Null when the source date is missing. */
+export function ageDays(from: Date | null | undefined, now: number): number | null {
+  if (!from || Number.isNaN(from.getTime())) return null;
+  return (now - from.getTime()) / MS_DAY;
+}
+
+/** Whole days from `now` until `from`. Negative means the date is already past. */
+export function daysUntil(from: Date | null | undefined, now: number): number | null {
+  if (!from || Number.isNaN(from.getTime())) return null;
+  return (from.getTime() - now) / MS_DAY;
 }
 
 export function formatStart(key: string | null | undefined): string {

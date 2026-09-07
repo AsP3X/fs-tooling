@@ -23,10 +23,23 @@ export interface Preset {
 /** Extensible bag of highlight dimensions. Unknown keys are ignored until a criterion is registered. */
 export interface FilterCriteria {
   idleDays?: number | null;
+  idleDaysMax?: number | null;
+  createdDays?: number | null;
+  createdDaysMax?: number | null;
   statuses?: string[];
+  excludeStatuses?: string[];
   startDates?: string[];
   maxProgress?: number | null;
+  minProgress?: number | null;
   startWithin?: number | null;
+  startPassed?: boolean | null;
+  kinds?: string[];
+  initiators?: string[];
+  subjectIncludes?: string[];
+  dueWithin?: number | null;
+  escalated?: boolean | null;
+  priorities?: number[];
+  unassigned?: boolean | null;
   [key: string]: unknown;
 }
 
@@ -37,6 +50,8 @@ export interface FilterRule {
   enabled: boolean;
   color: string;
   matchMode: MatchMode;
+  /** When true, paint rows that fail the rule instead of those that match. */
+  invert: boolean;
   criteria: FilterCriteria;
   /** Builtin id this custom rule was forked from. Restore puts the default back. */
   sourceId?: string | null;
@@ -103,6 +118,12 @@ export interface RowItem {
   label: string;
   recordId: number | null;
   fromApi: boolean;
+  subject: string;
+  createdDays: number | null;
+  dueIn: number | null;
+  priority: number | null;
+  unassigned: boolean | null;
+  escalated: boolean | null;
 }
 
 export interface Matchable {
@@ -112,6 +133,15 @@ export interface Matchable {
   updatedKey?: string | null;
   startIn: number | null;
   progress: { pct: number | null };
+  kind?: string;
+  initiator?: string;
+  subject?: string;
+  label?: string;
+  createdDays?: number | null;
+  dueIn?: number | null;
+  priority?: number | null;
+  unassigned?: boolean | null;
+  escalated?: boolean | null;
 }
 
 export interface Sortable {
@@ -150,4 +180,11 @@ export interface Reportable {
   kind: string;
   href?: string | null;
   label?: string;
+  initiator?: string;
+  subject?: string;
+  createdDays?: number | null;
+  dueIn?: number | null;
+  priority?: number | null;
+  unassigned?: boolean | null;
+  escalated?: boolean | null;
 }

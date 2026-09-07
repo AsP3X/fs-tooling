@@ -3,7 +3,8 @@
 
 import { parseRecordRef } from './api/ids';
 import { MS_DAY } from './constants';
-import { parseStartDate, parseTicketDate, dateKey } from './dates';
+import { ageDays, dateKey, daysUntil, parseStartDate, parseTicketDate } from './dates';
+import { agentCellUnassigned, parsePriority } from './ticket-fields';
 import { employeeKind, sanitizeTitle } from './text';
 import type { Progress, RowItem } from './types';
 
@@ -60,6 +61,50 @@ export function initiatorName(row: Element): string {
   return String(el?.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+/** First matching td[data-name] so extra ticket columns stay optional. */
+function namedCell(row: Element, names: string[]): HTMLElement | null {
+  for (let i = 0; i < names.length; i += 1) {
+    const el = row.querySelector(`td[data-name="${names[i]}"]`);
+    if (el instanceof HTMLElement) return el;
+  }
+  return null;
+}
+
+function cellDate(cell: Element | null): Date | null {
+  if (!cell) return null;
+  const titled = cell.querySelector('[data-test-id="date-cell"][title], [title]');
+  return parseTicketDate(titled?.getAttribute('title') || cell.getAttribute('title') || cell.textContent);
+}
+
+export function rowPriority(row: Element): number | null {
+  const cell = namedCell(row, ['priority']);
+  if (!cell) return null;
+  const titled = cell.querySelector('[title]');
+  return parsePriority(titled?.getAttribute('title') || cell.textContent);
+}
+
+export function rowDueDate(row: Element): Date | null {
+  return cellDate(namedCell(row, ['due_by', 'due_by_date', 'due_date', 'fr_due_by']));
+}
+
+export function rowUnassigned(row: Element): boolean | null {
+  const cell = namedCell(row, ['responder', 'agent', 'assigned_to', 'responder_name', 'agent_name']);
+  if (!cell) return null;
+  const name = String(cell.querySelector('a, .requester-cell-name')?.textContent || cell.textContent || '');
+  return agentCellUnassigned(name, true);
+}
+
+export function rowEscalated(row: Element): boolean | null {
+  const cell = namedCell(row, ['is_escalated', 'fr_escalated', 'sla_timer', 'sla_status']);
+  if (!cell) return null;
+  const text = `${cell.getAttribute('title') || ''} ${cell.textContent || ''}`;
+  if (/escalat/i.test(text)) return true;
+  const raw = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (raw === 'yes' || raw === 'true') return true;
+  if (raw === 'no' || raw === 'false' || raw === '—' || raw === '-') return false;
+  return false;
+}
+
 export function rowTbody(row: Element): HTMLTableSectionElement | null {
   return row.closest('tbody');
 }
@@ -89,6 +134,7 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
           : null;
     const startIn = start ? (start.getTime() - now) / MS_DAY : null;
     const href = ticketHref(row);
+    const due = rowDueDate(row);
     out.push({
       row,
       cell: updatedEl || createdEl,
@@ -108,6 +154,12 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       label: sanitizeTitle(title),
       recordId: parseRecordRef(href)?.id ?? null,
       fromApi: false,
+      subject: title,
+      createdDays: ageDays(created, now),
+      dueIn: daysUntil(due, now),
+      priority: rowPriority(row),
+      unassigned: rowUnassigned(row),
+      escalated: rowEscalated(row),
     });
   });
   return out;
