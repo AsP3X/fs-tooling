@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { STORAGE_KEY } from './constants';
-import { loadSettings, saveSettings } from './settings';
+import { loadSettings, saveSettings, savedPoint } from './settings';
 
 function memoryStorage(): Storage {
   const map = new Map<string, string>();
@@ -25,6 +25,14 @@ function memoryStorage(): Storage {
     },
   };
 }
+
+describe('savedPoint', () => {
+  it('requires both finite axes', () => {
+    expect(savedPoint(8, 20)).toEqual({ x: 8, y: 20 });
+    expect(savedPoint(8, null)).toBeNull();
+    expect(savedPoint(Number.NaN, 1)).toBeNull();
+  });
+});
 
 describe('loadSettings', () => {
   let storage: Storage;
@@ -80,5 +88,33 @@ describe('loadSettings', () => {
     s.tickets.days = 9;
     saveSettings(s, storage);
     expect(loadSettings(storage).tickets.days).toBe(9);
+  });
+
+  it('keeps collapsed FAB dock independent of the expanded panel point', () => {
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      x: 40,
+      y: 80,
+      fabX: 12,
+      fabY: 400,
+    }));
+    const s = loadSettings(storage);
+    expect(s.x).toBe(40);
+    expect(s.y).toBe(80);
+    expect(s.fabX).toBe(12);
+    expect(s.fabY).toBe(400);
+  });
+
+  it('drops incomplete or non-finite dock coordinates', () => {
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      x: 10,
+      y: null,
+      fabX: 'left',
+      fabY: 20,
+    }));
+    const s = loadSettings(storage);
+    expect(s.x).toBeNull();
+    expect(s.y).toBeNull();
+    expect(s.fabX).toBeNull();
+    expect(s.fabY).toBeNull();
   });
 });

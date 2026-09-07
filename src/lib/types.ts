@@ -43,8 +43,12 @@ export interface PageSettings {
 export interface Settings {
   module: ModuleSetting;
   collapsed: boolean;
+  /** Top-left of the expanded panel. */
   x: number | null;
   y: number | null;
+  /** Top-left of the collapsed FAB. Independent of x/y so collapse returns to the last FAB dock. */
+  fabX: number | null;
+  fabY: number | null;
   uiOpen: Record<string, boolean>;
   tickets: PageSettings;
   journeys: PageSettings;

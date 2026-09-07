@@ -8,6 +8,7 @@ import { formatStart, parseStartInput } from '../lib/dates';
 import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
 import { loadHistory, saveSnapshot } from '../lib/history';
+import { savedPoint } from '../lib/settings';
 import { collectRows } from '../lib/rows';
 import { clearApiKey, getApiKey, maskApiKey, setApiKey } from '../lib/secrets';
 import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
@@ -248,13 +249,16 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     host.style.bottom = 'auto';
     return p;
   }
+  // Human: Collapsed uses fabX/fabY; expanded uses x/y. Unset dock → default bottom-right.
+  // Agent: READS settings.collapsed + dock coords. WRITES host left/top, or bottom/right when that dock is unset.
   function applySavedPosition(): void {
     const settings = getSettings();
-    if (Number.isFinite(settings.x) && Number.isFinite(settings.y) && settings.x != null && settings.y != null) {
-      requestAnimationFrame(() => placeAt(settings.x as number, settings.y as number));
-    } else {
-      placeDefault();
-    }
+    const dock = settings.collapsed
+      ? savedPoint(settings.fabX, settings.fabY)
+      : savedPoint(settings.x, settings.y);
+    void host.offsetWidth;
+    if (dock) placeAt(dock.x, dock.y);
+    else placeDefault();
   }
 
   function renderStats(): void {
@@ -565,7 +569,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   function updateRoot(partial: Parameters<typeof patchRoot>[0]): void {
     patchRoot(partial);
     syncUI();
-    if (!('x' in partial || 'y' in partial || 'collapsed' in partial)) markTickets();
+    if (!('x' in partial || 'y' in partial || 'fabX' in partial || 'fabY' in partial || 'collapsed' in partial)) markTickets();
   }
 
   function updatePage(partial: Partial<PageSettings>): void {
@@ -593,14 +597,16 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
         moved = true;
         didDrag.current = true;
         const p = placeAt(origX + dx, origY + dy);
-        assignRoot({ x: p.x, y: p.y });
+        if (getSettings().collapsed) assignRoot({ fabX: p.x, fabY: p.y });
+        else assignRoot({ x: p.x, y: p.y });
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         if (moved) {
           const s = getSettings();
-          patchRoot({ x: s.x, y: s.y });
+          if (s.collapsed) patchRoot({ fabX: s.fabX, fabY: s.fabY });
+          else patchRoot({ x: s.x, y: s.y });
         }
       };
       window.addEventListener('pointermove', onMove);
@@ -820,10 +826,13 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
 
   window.addEventListener('resize', () => {
     const settings = getSettings();
-    if (Number.isFinite(settings.x) && Number.isFinite(settings.y) && settings.x != null && settings.y != null) {
-      const p = placeAt(settings.x, settings.y);
-      patchRoot({ x: p.x, y: p.y });
-    }
+    const dock = settings.collapsed
+      ? savedPoint(settings.fabX, settings.fabY)
+      : savedPoint(settings.x, settings.y);
+    if (!dock) return;
+    const p = placeAt(dock.x, dock.y);
+    if (settings.collapsed) patchRoot({ fabX: p.x, fabY: p.y });
+    else patchRoot({ x: p.x, y: p.y });
   });
 
   applyPageStyles();

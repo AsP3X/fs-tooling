@@ -44,7 +44,7 @@ A from–to **date range** (`startFrom` / `startTo`) is a separate overlay, not 
 
 | Key | Where | Contents |
 |-----|--------|----------|
-| `sth-settings-v2` | Page `localStorage` | Module, panel position, per-page filters/views |
+| `sth-settings-v2` | Page `localStorage` | Module, expanded panel `x`/`y`, collapsed FAB `fabX`/`fabY`, per-page filters/views |
 | `sth-history-v2` | Page `localStorage` | Rolling statistics snapshots (counts/averages only) |
 | `sth.apiKey` | Extension `chrome.storage.local` (service worker) | Freshservice API key. Never written to page storage. |
 | `sth.updates.cache` | Extension `chrome.storage.local` (service worker) | Last GitHub `/releases/latest` snapshot + ETag, max-age 24h |

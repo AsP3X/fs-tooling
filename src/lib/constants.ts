@@ -77,6 +77,8 @@ export function defaultSettings(): Settings {
     collapsed: false,
     x: null,
     y: null,
+    fabX: null,
+    fabY: null,
     uiOpen: {},
     tickets: defaultPage(),
     journeys: defaultPage({ days: 7, color: '#1565c0' }),

@@ -1,5 +1,5 @@
 // Human: Load/save panel settings from the host page's localStorage (shared with Tampermonkey userscript).
-// Agent: READS/WRITES STORAGE_KEY. Always merge onto defaults and normalize arrays/enums so old payloads keep working.
+// Agent: READS/WRITES STORAGE_KEY. Always merge onto defaults and normalize arrays/enums so old payloads keep working. fabX/fabY are the collapsed dock; missing keys stay null.
 
 import { STORAGE_KEY, defaultSettings } from './constants';
 import { normalizeRange } from './range';
@@ -31,9 +31,28 @@ export function normalizePage(page: PageSettings): PageSettings {
   return next;
 }
 
+// Human: Pixel coords from storage. Non-finite values must not reach placeAt.
+export function finiteCoord(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** Both axes required. A half-set point is treated as unset. */
+export function savedPoint(x: unknown, y: unknown): { x: number; y: number } | null {
+  const px = finiteCoord(x);
+  const py = finiteCoord(y);
+  if (px == null || py == null) return null;
+  return { x: px, y: py };
+}
+
 export function normalizeSettings(raw: Settings): Settings {
+  const panel = savedPoint(raw.x, raw.y);
+  const fab = savedPoint(raw.fabX, raw.fabY);
   const next: Settings = {
     ...raw,
+    x: panel ? panel.x : null,
+    y: panel ? panel.y : null,
+    fabX: fab ? fab.x : null,
+    fabY: fab ? fab.y : null,
     tickets: normalizePage(raw.tickets),
     journeys: normalizePage(raw.journeys),
     uiOpen: { ...(raw.uiOpen || {}) },
