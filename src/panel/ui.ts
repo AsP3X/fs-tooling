@@ -625,10 +625,34 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     syncUI();
   });
   const deskBtn = $('openDeskSettings');
+  const deskStatus = $('deskSettingsStatus');
   if (!hasExtensionRuntime()) deskBtn.closest('.card')?.setAttribute('hidden', '');
-  deskBtn.addEventListener('click', () => {
-    void chrome.runtime.sendMessage({ type: 'sth.desks.open' });
-  });
+  // Human: Content scripts cannot open the options page. A sleeping worker can drop the first message; retry before showing an error.
+  // Agent: CALLS sth.desks.open (worker tabs.create). WRITES #deskSettingsStatus on failure.
+  const openDeskSettings = async (): Promise<void> => {
+    deskStatus.textContent = '';
+    deskStatus.classList.add('hide');
+    deskStatus.classList.remove('err');
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i += 1) {
+      try {
+        const raw = await chrome.runtime.sendMessage({ type: 'sth.desks.open' });
+        const res = (raw || {}) as { ok?: boolean };
+        if (res.ok === true) return;
+        lastErr = new Error('open_failed');
+      } catch (err) {
+        lastErr = err;
+      }
+      if (i < 2) await new Promise((r) => setTimeout(r, 80 * (i + 1)));
+    }
+    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr || '');
+    deskStatus.textContent = /invalidated/i.test(msg)
+      ? 'Reload this Freshservice tab, then try again.'
+      : 'Couldn’t open Desk URL settings. Try the toolbar icon.';
+    deskStatus.classList.add('err');
+    deskStatus.classList.remove('hide');
+  };
+  deskBtn.addEventListener('click', () => { void openDeskSettings(); });
   $('openSettings').addEventListener('click', (e) => {
     e.stopPropagation();
     settingsOpen = true;

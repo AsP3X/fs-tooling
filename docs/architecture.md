@@ -4,7 +4,7 @@
 
 The product is a Manifest V3 **content script** plus a small **service worker** (API key storage, GitHub update check, and custom-domain inject). Chrome and Edge load the same package.
 
-Declared content scripts match `*.freshservice.com` and `*.myfreshworks.com`. A **custom CNAME desk** does not match those patterns. The user adds that origin on the extension **Desk URL** options page (`sth.desks` in `chrome.storage.local`). First install opens that page. Optional host permission is requested for each saved origin; the worker then registers `content.js` for those matches and allows `/api/v2` proxy only to default SaaS hosts or saved desks. No tenant hostname is hardcoded.
+Declared content scripts match `*.freshservice.com` and `*.myfreshworks.com`. A **custom CNAME desk** does not match those patterns. The user adds that origin on the extension **Desk URL** options page (`sth.desks` in `chrome.storage.local`). First install, **Settings → Configure desk URL**, and the toolbar icon on a non-desk tab open `options.html` via `tabs.create` (and focus an existing tab when there is one) — `openOptionsPage` from an MV3 worker is unreliable if the worker is killed before the tab exists. Optional host permission is requested **on that options page in the same click as Add** (a worker round-trip first would drop Chrome's user-gesture). The worker then registers `content.js` for those matches and allows `/api/v2` proxy only to default SaaS hosts or saved desks. No tenant hostname is hardcoded.
 
 ```
 src/
@@ -58,7 +58,7 @@ Panel settings keys live on the **host page** origin so a Tampermonkey install a
 
 ## Addon updates
 
-The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). CI tags look like `v2.7.0-42`; comparison uses the addon version (`2.7.0`) and ignores the build suffix, so a new zip of the same version does not notify.
+The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). Release tags are `vMAJOR.MINOR.PATCH` on `master` (see `.github/workflows/release.yml`). Comparison uses the addon version (`2.8.5`) and ignores a historical CI build suffix (`v2.7.0-42`), so a new zip of the same version does not notify.
 
 If that version is newer than `chrome.runtime.getManifest().version` and has not been dismissed, the panel shows a toast. **Dismiss** writes `sth.updates.dismissed` and hides the toast until a higher version is published. **Settings → About** always shows the installed version and publisher, and **Check for updates** forces a GitHub fetch (skips the 24h cache). When a newer release exists, About shows a link to it even if the toast was dismissed. The userscript build has no worker and skips the check.
 

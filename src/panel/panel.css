@@ -12,6 +12,10 @@
 .fab .dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent, #e65100); color: #fff; font-size: 12px; font-weight: 700; pointer-events: none; }
 .fab .label { font-size: 13px; font-weight: 600; pointer-events: none; }
 .panel { width: 320px; border-radius: 18px; overflow: hidden; }
+#settingsPanel {
+  max-height: min(calc(100vh - 40px), 640px);
+  overflow: auto;
+}
 .chrome-row { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; }
 .panel.manage {
   width: min(520px, 78vw);
@@ -49,6 +53,7 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 .seg button { height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: #9aa3ad; font-size: 11px; font-weight: 650; cursor: pointer; }
 .seg button.on { background: var(--accent, #e65100); color: #fff; }
 .hint { margin: 0; font-size: 11px; color: #8b949e; line-height: 1.35; }
+.hint.err { color: #ef9a9a; }
 .tagbox-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 0; min-height: 24px; }
 .tagbox-body { display: none; }
 .tagbox.open .tagbox-body { display: grid; gap: 8px; }

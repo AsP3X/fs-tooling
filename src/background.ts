@@ -37,22 +37,50 @@ function looksLikeFreshserviceUrl(url) {
     if (u.protocol !== 'https:') return false;
     if (isDefaultAddonHost(u.hostname)) return true;
     const path = u.pathname || '/';
-    return path.startsWith('/a/') || path.startsWith('/helpdesk') || path.startsWith('/support/');
+    return path === '/a' || path.startsWith('/a/') || path.startsWith('/helpdesk') || path.startsWith('/support/');
   } catch {
     return false;
   }
 }
 
+const BLOCKED_DESK_HOSTS = new Set([
+  'https', 'http', 'ftp', 'file', 'javascript', 'mailto', 'about', 'chrome', 'edge', 'www',
+]);
+
+function usableDeskHost(host) {
+  if (!host || host === 'localhost' || host.includes('..')) return false;
+  if (host === 'github.com' || host.endsWith('.github.com') || host === 'api.github.com') return false;
+  if (BLOCKED_DESK_HOSTS.has(host)) return false;
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return true;
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(host);
+}
+
 function parseDeskOrigin(raw) {
-  const s = String(raw || '').trim();
+  let s = String(raw || '');
+  try { s = s.normalize('NFKC'); } catch { /* ignore */ }
+  s = s.replace(/[\u200B-\u200D\uFEFF\u2060\u00AD\u00A0]/g, '');
+  s = s.replace(/[\u201C\u201D\u00AB\u00BB]/g, '"').replace(/[\u2018\u2019\u2039\u203A]/g, "'");
+  s = Array.from(s, (ch) => {
+    const c = ch.charCodeAt(0);
+    return c < 32 || c === 127 ? ' ' : ch;
+  }).join('').replace(/\s+/g, ' ').trim();
   if (!s) return null;
+  const wrapLead = new Set(['"', "'", '<', '(', '[']);
+  const wrapTail = new Set(['"', "'", '>', ')', ']']);
+  while (s.length && wrapLead.has(s[0])) s = s.slice(1);
+  while (s.length && wrapTail.has(s[s.length - 1])) s = s.slice(0, -1);
+  s = s.trim();
+  const embedded = s.match(/https?:\/\/[^\s<>"']+/i);
+  if (embedded) s = embedded[0];
+  s = s.replace(/[.,;:!?]+$/g, '');
+  if (/^\/\//.test(s)) s = `https:${s}`;
+  s = s.replace(/^(?:https?:\/\/)+/i, 'https://');
+  if (!/^https:\/\//i.test(s)) s = `https://${s}`;
   try {
-    const withProto = /^https?:\/\//i.test(s) ? s : `https://${s}`;
-    const u = new URL(withProto);
+    const u = new URL(s);
     if (u.protocol !== 'https:') return null;
-    const host = u.hostname.toLowerCase();
-    if (!host || host === 'localhost') return null;
-    if (host === 'github.com' || host.endsWith('.github.com') || host === 'api.github.com') return null;
+    const host = u.hostname.toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+    if (!usableDeskHost(host)) return null;
     const origin = `https://${host}${u.port && u.port !== '443' ? `:${u.port}` : ''}`;
     return { origin, builtin: isDefaultAddonHost(host) };
   } catch {
@@ -77,7 +105,57 @@ async function readDesks() {
 
 async function writeDesks(origins) {
   await chrome.storage.local.set({ [DESKS_KEY]: origins });
-  await syncCustomContentScripts();
+  try {
+    await syncCustomContentScripts();
+  } catch {
+    setTimeout(() => { void syncCustomContentScripts().catch(() => {}); }, 250);
+  }
+  void revealTabsForOrigins(origins);
+}
+
+function optionsPageUrl() {
+  return chrome.runtime.getURL('options.html');
+}
+
+function sameOptionsUrl(documentUrl, optionsUrl) {
+  const cleaned = String(documentUrl || '').split('#')[0].split('?')[0];
+  return cleaned === optionsUrl;
+}
+
+// Human: Open Desk URL as a real tab and wait until it exists. Fire-and-forget openOptionsPage is a no-op when the MV3 worker is killed mid-call.
+// Agent: CALLS runtime.getContexts + tabs.update to focus an existing options tab, else tabs.create(options.html), else openOptionsPage. Awaits so onMessage / onClicked / onInstalled keep the worker alive.
+async function openDeskOptions(prefillOrigin) {
+  const base = optionsPageUrl();
+  const url = prefillOrigin
+    ? `${base}?desk=${encodeURIComponent(prefillOrigin)}`
+    : base;
+  try {
+    // A prefill must load a new query string; focusing the bare options tab would drop it.
+    if (!prefillOrigin && typeof chrome.runtime.getContexts === 'function') {
+      const contexts = await chrome.runtime.getContexts({ contextTypes: ['TAB'] });
+      const hit = (contexts || []).find((ctx) => sameOptionsUrl(ctx.documentUrl, base) && ctx.tabId);
+      if (hit?.tabId) {
+        await chrome.tabs.update(hit.tabId, { active: true });
+        if (hit.windowId && chrome.windows?.update) {
+          try { await chrome.windows.update(hit.windowId, { focused: true }); } catch { /* ignore */ }
+        }
+        return { ok: true };
+      }
+    }
+  } catch {
+    /* no existing tab, or getContexts unavailable */
+  }
+  try {
+    await chrome.tabs.create({ url });
+    return { ok: true };
+  } catch {
+    try {
+      await chrome.runtime.openOptionsPage();
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'open_failed' };
+    }
+  }
 }
 
 async function allowedOrigin(origin) {
@@ -367,18 +445,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (type === 'sth.desks.open') {
-    try {
-      chrome.runtime.openOptionsPage();
-      sendResponse({ ok: true });
-    } catch {
-      sendResponse({ ok: false });
-    }
+    reply(sendResponse, openDeskOptions());
     return true;
   }
   return undefined;
 });
 
-async function syncCustomContentScripts() {
+let desksSync = Promise.resolve();
+
+// Human: Re-register content.js for saved custom desks. One-at-a-time — onAdded and Add both call this and a parallel unregister/register pair throws "duplicate id".
+// Agent: READS sth.desks. CALLS scripting.unregisterContentScripts + registerContentScripts. THROWS if all 3 register attempts fail.
+function syncCustomContentScripts() {
+  const op = desksSync.then(syncCustomContentScriptsNow, syncCustomContentScriptsNow);
+  desksSync = op.then(() => undefined, () => undefined);
+  return op;
+}
+
+async function syncCustomContentScriptsNow() {
   if (!chrome.scripting?.registerContentScripts) return;
   try {
     await chrome.scripting.unregisterContentScripts({ ids: [CUSTOM_SCRIPT_ID] });
@@ -387,14 +470,40 @@ async function syncCustomContentScripts() {
   }
   const extra = (await readDesks()).map(originMatchPattern).filter(Boolean);
   if (!extra.length) return;
-  await chrome.scripting.registerContentScripts([{
+  const script = {
     id: CUSTOM_SCRIPT_ID,
     matches: extra,
     js: ['content.js'],
     runAt: 'document_idle',
     persistAcrossSessions: true,
     allFrames: false,
-  }]);
+  };
+  // Register can lose a race with permissions.request; retry before failing the save.
+  let lastErr;
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      await chrome.scripting.registerContentScripts([script]);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (i < 2) await new Promise((r) => setTimeout(r, 50 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function revealTabsForOrigins(origins) {
+  if (!chrome.tabs?.query) return;
+  for (const origin of origins) {
+    const pattern = originMatchPattern(origin);
+    if (!pattern) continue;
+    try {
+      const tabs = await chrome.tabs.query({ url: pattern });
+      for (const tab of tabs) {
+        if (tab.id) await revealOrInject(tab.id);
+      }
+    } catch { /* ignore */ }
+  }
 }
 
 async function revealOrInject(tabId) {
@@ -414,8 +523,18 @@ async function revealOrInject(tabId) {
 chrome.action?.onClicked?.addListener(async (tab) => {
   const tabId = tab?.id;
   const url = String(tab?.url || '');
-  if (!tabId || !looksLikeFreshserviceUrl(url)) {
-    try { chrome.runtime.openOptionsPage(); } catch { /* ignore */ }
+  if (!tabId) {
+    await openDeskOptions();
+    return;
+  }
+  if (!looksLikeFreshserviceUrl(url)) {
+    // Known custom desk on a login/home path: inject. Do not await storage before a permission prompt.
+    const parsedDesk = parseDeskOrigin(url);
+    if (parsedDesk && !parsedDesk.builtin && (await readDesks()).includes(parsedDesk.origin)) {
+      await revealOrInject(tabId);
+      return;
+    }
+    await openDeskOptions();
     return;
   }
   const parsed = new URL(url);
@@ -434,7 +553,9 @@ chrome.action?.onClicked?.addListener(async (tab) => {
           }
         }
       } catch {
-        /* user closed the prompt */
+        // Service workers cannot always show the host-permission prompt; the options page can.
+        await openDeskOptions(parsed.origin);
+        return;
       }
     }
   }
@@ -442,14 +563,12 @@ chrome.action?.onClicked?.addListener(async (tab) => {
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void syncCustomContentScripts();
-  if (details?.reason === 'install') {
-    try { chrome.runtime.openOptionsPage(); } catch { /* ignore */ }
-  }
+  return (async () => {
+    await syncCustomContentScripts();
+    if (details?.reason === 'install') await openDeskOptions();
+  })();
 });
-chrome.runtime.onStartup?.addListener(() => {
-  void syncCustomContentScripts();
-});
+chrome.runtime.onStartup?.addListener(() => syncCustomContentScripts());
 chrome.permissions?.onAdded?.addListener(() => {
   void syncCustomContentScripts();
 });
