@@ -5,6 +5,8 @@ import { MS_DAY } from '../constants';
 import { ageDays, dateKey, daysUntil } from '../dates';
 import { employeeKind, sanitizeTitle } from '../text';
 import { parsePriority } from '../ticket-fields';
+import type { TicketSample } from '../ops';
+import { parseStatusActivities } from '../ops-timeline';
 import type { PageSettings, Reportable } from '../types';
 import { apiRequest, asArray, asRecord } from './http';
 import { buildTicketFilterQuery, chunkIds, idsQuery } from './query';
@@ -150,6 +152,46 @@ export async function fetchTicket(id: number): Promise<ApiTicket | null> {
   if (!res.ok) return null;
   const root = asRecord(res.json);
   return asApiTicket(root.ticket || root);
+}
+
+function isoMs(raw: unknown): number | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Map a ticket JSON payload to ops fields. Drops subject, requester, and agent names. */
+export function ticketSampleFromJson(raw: unknown, maps: StatusMaps): TicketSample | null {
+  const ticket = asApiTicket(raw);
+  if (!ticket) return null;
+  const rec = asRecord(raw);
+  const stats = asRecord(rec.stats);
+  return {
+    status: statusLabel(ticket.status, maps),
+    createdAt: isoMs(ticket.created_at),
+    resolvedAt: isoMs(stats.resolved_at || rec.resolved_at),
+    closedAt: isoMs(stats.closed_at || rec.closed_at),
+    firstRespondedAt: isoMs(stats.first_responded_at || rec.first_responded_at),
+    responderId: ticket.responderId,
+  };
+}
+
+// Human: One ticket + stats embed. Used by the ops ledger, never written as a name-bearing record.
+// Agent: CALLS GET /api/v2/tickets/{id}?include=stats. RETURNS TicketSample without subject/requester.
+export async function fetchTicketSample(id: number): Promise<TicketSample | null> {
+  const res = await apiRequest(`/api/v2/tickets/${id}?include=stats`);
+  if (!res.ok) return null;
+  const root = asRecord(res.json);
+  const maps = await getStatusMaps();
+  return ticketSampleFromJson(root.ticket || root, maps);
+}
+
+// Human: Status transitions from the activities feed. Raw sentences are parsed and discarded.
+// Agent: CALLS GET /api/v2/tickets/{id}/activities. RETURNS { at, status } only.
+export async function fetchTicketStatusLog(id: number): Promise<NonNullable<TicketSample['statusLog']>> {
+  const res = await apiRequest(`/api/v2/tickets/${id}/activities`);
+  if (!res.ok) return [];
+  return parseStatusActivities(res.json);
 }
 
 export async function fetchTicketsByIds(ids: number[]): Promise<Map<number, ApiTicket>> {

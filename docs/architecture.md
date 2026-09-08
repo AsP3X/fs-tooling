@@ -48,7 +48,8 @@ A from–to **date range** (`startFrom` / `startTo`) is a separate overlay, not 
 | Key | Where | Contents |
 |-----|--------|----------|
 | `sth-settings-v2` | Page `localStorage` | Module, expanded panel `x`/`y`, collapsed FAB `fabX`/`fabY`, per-page filters/views |
-| `sth-history-v2` | Page `localStorage` | Rolling statistics snapshots (counts/averages only) |
+| `sth-history-v2` | Page `localStorage` | Legacy list-snapshot history (no longer written) |
+| `sth-ops-v1` | Page `localStorage` | Ticket ops ledger: ticket ids, status labels, timestamps, assignment-to-self flags. No names or subjects. |
 | `sth.apiKey` | Extension `chrome.storage.local` (service worker) | Freshservice API key. Never written to page storage. |
 | `sth.desks` | Extension `chrome.storage.local` (service worker) | User-configured custom desk origins (`https://host`). Empty on SaaS-only installs. |
 | `sth.updates.cache` | Extension `chrome.storage.local` (service worker) | Last GitHub `/releases/latest` snapshot + ETag, max-age 24h |
@@ -58,7 +59,7 @@ Panel settings keys live on the **host page** origin so a Tampermonkey install a
 
 ## Addon updates
 
-The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). Release tags are `vMAJOR.MINOR.PATCH` on `master` (see `.github/workflows/release.yml`). Comparison uses the addon version (`2.8.5`) and ignores a historical CI build suffix (`v2.7.0-42`), so a new zip of the same version does not notify.
+The service worker GETs GitHub’s [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) (`/repos/AsP3X/fs-tooling/releases/latest`), at most once per 24 hours (ETag revalidation after that; 15 minutes after a failed fetch). Release tags are `vMAJOR.MINOR.PATCH` on `master` (see `.github/workflows/release.yml`). In-dev tags `indev-VERSION` on `dev` publish a prerelease that is not latest (`.github/workflows/indev.yml`). Comparison uses the addon version (`2.8.5`) and ignores a historical CI build suffix (`v2.7.0-42`), so a new zip of the same version does not notify.
 
 If that version is newer than `chrome.runtime.getManifest().version` and has not been dismissed, the panel shows a toast. **Dismiss** writes `sth.updates.dismissed` and hides the toast until a higher version is published. **Settings → About** always shows the installed version and publisher, and **Check for updates** forces a GitHub fetch (skips the 24h cache). When a newer release exists, About shows a link to it even if the toast was dismissed. The userscript build has no worker and skips the check.
 
@@ -77,6 +78,19 @@ To add a new context-specific card without restyling the panel:
 Each module has an ordered list of **filters** (defaults + custom). Each filter has a color, All/Any matching, and an extensible `criteria` bag. Criteria are registered in `src/lib/filters.ts` (`registerCriterion` / `registerFilterPage`) so a new list type can add dimensions without rewriting the panel.
 
 Enabled filters run **in list order**. The first match paints the row in that filter’s color. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
+
+## Ticket ops (statistics)
+
+**Statistics** is a side panel (same chrome as Manage filters). It tracks tickets this browser opens:
+
+- Opens and first/last seen
+- Time in each status (from the ticket activities log when an API key is saved, otherwise from visits)
+- Time to first response / resolve (from the ticket `stats` embed when an API key is saved)
+- Whether the ticket left this agent and came back (`returnedCount`)
+
+Storage is `sth-ops-v1` on the **page** origin. Fields are ticket id, status labels, timestamps, and booleans. Requester names, agent names, and subjects are not written. On a ticket detail URL the panel shows that ticket; on a list it shows the aggregate.
+
+The previous idle-bucket snapshot UI (`sth-history-v2`) is no longer written.
 
 Editing a default and saving forks a custom copy (`sourceId`) in the same slot; **Restore default** puts the built-in back. `sth-settings-v2` still holds the live recipe fields for compatibility; `filters` is merged on load. The filter manager is a wider side panel next to the main UI.
 

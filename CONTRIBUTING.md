@@ -44,6 +44,18 @@ Load the unpacked build from `dist/sth-extension/` — details in [Local develop
 
 Do not push a tag until `master` contains the intended commit. The workflow does not mint tags; it only creates a GitHub Release for the tag you pushed.
 
+### In-dev builds
+
+`.github/workflows/indev.yml` publishes a **prerelease** named `indev-VERSION` when an `indev-*` tag points at **`dev`** (not `master`).
+
+```bash
+# on a dev commit whose package.json version is 2.8.5
+git tag indev-2.8.5
+git push origin indev-2.8.5
+```
+
+Allowed tags: `indev-2.8.5`, `indev-v2.8.5`, or a build suffix `indev-2.8.5.1`. The GitHub release title is always `indev-MAJOR.MINOR.PATCH`. It is marked prerelease and is not “latest”.
+
 ## Generated artifacts (do not commit)
 
 These paths are local build output and are listed in `.gitignore`. They must not appear in `git ls-files`:

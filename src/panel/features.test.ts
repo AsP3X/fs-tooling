@@ -29,4 +29,9 @@ describe('featureVisible', () => {
     expect(featureVisible(spec('empty-hint'), listTickets)).toBe(false);
     expect(featureVisible(spec('empty-hint'), detailTickets)).toBe(true);
   });
+
+  it('shows ticket ops on a ticket detail page', () => {
+    expect(featureVisible(spec('stats-entry'), detailTickets)).toBe(true);
+    expect(featureVisible(spec('stats-entry'), listTickets)).toBe(false);
+  });
 });

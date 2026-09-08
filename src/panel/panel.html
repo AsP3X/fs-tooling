@@ -23,6 +23,18 @@
     <div class="card hide" id="filterEditor"></div>
   </div>
 </section>
+<section class="panel manage hide" id="statsPanel">
+  <header class="head" id="statsHandle">
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
+    <div class="titles"><h1 id="statsTitle">Ticket ops</h1><p id="statsSub">Your tracked tickets</p></div>
+    <button class="icon-btn" id="closeStats" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </header>
+  <div class="body" id="statsBody"></div>
+  <div class="foot">
+    <button class="primary" id="refreshStats" type="button">Refresh</button>
+    <button class="ghost" id="clearOps" type="button">Clear tracking</button>
+  </div>
+</section>
 <section class="panel" id="panel">
   <header class="head" id="dragHandle">
     <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/><path d="M12 8v5l3 2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
@@ -79,6 +91,11 @@
     <div class="card" id="contextHint" data-feature="empty-hint">
       <p class="hint" id="contextHintText">Open a ticket or journeys list to use filters.</p>
     </div>
+    <div class="card" data-feature="stats-entry">
+      <span class="label">Ticket ops</span>
+      <p class="hint">Time in status, opens, and whether it came back to you. No names stored.</p>
+      <button class="ghost" id="openStatsDetail" type="button">Open statistics</button>
+    </div>
     <div id="featureMount"></div>
   </div>
   <div class="foot" data-feature="list-foot">
@@ -90,18 +107,6 @@
   </div>
 </section>
 </div>
-<section class="panel report" id="report">
-  <header class="head" id="reportHandle">
-    <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>
-    <div class="titles"><h1 id="reportTitle">Statistics</h1><p id="reportSub">Live snapshot</p></div>
-    <button class="icon-btn" id="closeReport"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-  </header>
-  <div class="body" id="reportBody"></div>
-  <div class="foot">
-    <button class="primary" id="saveSnap">Save snapshot</button>
-    <button class="ghost" id="clearHist">Clear history</button>
-  </div>
-</section>
 <section class="panel report hide" id="resultsPanel">
   <header class="head" id="resultsHandle">
     <div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></div>

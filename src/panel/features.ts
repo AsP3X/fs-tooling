@@ -25,6 +25,7 @@ export const BUILTIN_FEATURES: FeatureSpec[] = [
   { id: 'list-sort', modules: ['tickets', 'journeys'], surfaces: ['list'] },
   { id: 'list-foot', modules: ['tickets', 'journeys'], surfaces: ['list'] },
   { id: 'empty-hint', modules: ['global'], surfaces: ['detail', 'other'] },
+  { id: 'stats-entry', modules: ['tickets'], surfaces: ['detail'] },
 ];
 
 const plugins: PanelFeature[] = [];

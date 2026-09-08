@@ -1,6 +1,8 @@
 // Human: String helpers for titles, HTML, colors, and duration labels.
 // Agent: PURE. sanitizeTitle strips person names from onboarding subjects before display/stats labels.
 
+import { MS_DAY } from './constants';
+
 const HTML_ESCAPES: Record<string, string> = {
   '&': '&amp;',
   '<': '&lt;',
@@ -40,4 +42,10 @@ export function fmtDur(d: number | null | undefined): string {
   }
   const v = Math.abs(d);
   return `${d < 0 ? '−' : ''}${v < 10 ? v.toFixed(1) : Math.round(v)}d`;
+}
+
+/** Format a millisecond duration for ops stats (always non-negative). */
+export function fmtMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  return fmtDur(ms / MS_DAY);
 }

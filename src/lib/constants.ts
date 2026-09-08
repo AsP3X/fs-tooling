@@ -12,8 +12,16 @@ export const ROW_MARK = `${NS}-row`;
 export const CELL_MARK = `${NS}-cell`;
 export const STORAGE_KEY = `${NS}-settings-v2`;
 export const HISTORY_KEY = `${NS}-history-v2`;
+/** Ticket-ops ledger: IDs, status labels, and timestamps only. Never names or subjects. */
+export const OPS_KEY = `${NS}-ops-v1`;
 export const MS_DAY = 86400000;
 export const MAX_SNAPS = 90;
+export const MAX_OPS_TICKETS = 400;
+export const OPS_REOPEN_MS = 2 * 60 * 1000;
+/** Minimum gap between API/DOM samples for the same ticket (detail pages mutate constantly). */
+export const OPS_SAMPLE_MS = 45 * 1000;
+/** Cap stored open timestamps per ticket (sparkline + openCount). */
+export const MAX_OPS_OPENS = 80;
 
 export const MONTHS: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,

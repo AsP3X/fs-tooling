@@ -448,8 +448,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     reply(sendResponse, openDeskOptions());
     return true;
   }
+  if (type === 'sth.self.agentId') {
+    reply(sendResponse, readPageAgentId(_sender?.tab?.id));
+    return true;
+  }
   return undefined;
 });
+
+// Human: Read the logged-in agent id from the page JS world. Content scripts cannot see window.current_user.
+// Agent: CALLS scripting.executeScript world MAIN. RETURNS { ok, id } with a numeric id or null. Never returns a name.
+async function readPageAgentId(tabId) {
+  if (!tabId || !chrome.scripting?.executeScript) return { ok: true, id: null };
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        const n = (obj) => {
+          const id = Number(obj && obj.id);
+          return Number.isFinite(id) && id > 0 ? Math.floor(id) : null;
+        };
+        const w = window;
+        return n(w.current_user)
+          || n(w.currentUser)
+          || n(w.preload_data && w.preload_data.current_user)
+          || null;
+      },
+    });
+    const id = Number(result?.result);
+    return { ok: true, id: Number.isFinite(id) && id > 0 ? Math.floor(id) : null };
+  } catch {
+    return { ok: true, id: null };
+  }
+}
 
 let desksSync = Promise.resolve();
 

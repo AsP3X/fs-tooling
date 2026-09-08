@@ -10,9 +10,14 @@ export interface RecordRef {
 
 export function parseRecordRef(href: string | null | undefined): RecordRef | null {
   if (!href) return null;
-  const ticket = href.match(/\/tickets\/(\d+)/i);
+  let path = String(href);
+  try {
+    if (/^https?:/i.test(path)) path = new URL(path).pathname;
+    else path = path.split(/[?#]/)[0];
+  } catch { /* keep raw */ }
+  const ticket = path.match(/\/tickets\/(\d+)/i);
   if (ticket) return { kind: 'ticket', id: Number(ticket[1]) };
-  const journey = href.match(/\/(?:employee_onboarding|journeys\/requests|journeys)\/(\d+)/i);
+  const journey = path.match(/\/(?:employee_onboarding|journeys\/requests|journeys)\/(\d+)/i);
   if (journey) return { kind: 'journey', id: Number(journey[1]) };
   return null;
 }

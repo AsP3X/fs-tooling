@@ -1,0 +1,75 @@
+# Human: In-dev GitHub Release from an indev-* tag that points at the dev branch.
+# Agent: TRIGGERS on refs/tags/indev-*. REQUIRES tagged commit on origin/dev. WRITES a prerelease named indev-VERSION (not latest).
+
+name: In-dev release
+
+on:
+  push:
+    tags:
+      - 'indev-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indev-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  indev:
+    name: Build and publish in-dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require an indev tag on dev
+        id: meta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^indev-v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not an in-dev version tag (expected indev-MAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+          if ! git fetch --no-tags origin dev; then
+            echo "::error::origin/dev does not exist yet. Push the dev branch before tagging indev-*."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/dev; then
+            echo "::error::Tag '$TAG' is not on dev. In-dev releases only publish from the dev branch."
+            exit 1
+          fi
+          version="$(echo "$TAG" | sed -E 's/^indev-v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_name=indev-$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install and build
+        run: npm ci && npm run build
+
+      - name: Publish in-dev GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.meta.outputs.release_name }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/sth-extension.zip
+            dist/sth-extension.tar.gz
+            dist/freshservice-mod-dialog.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

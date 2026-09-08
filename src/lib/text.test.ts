@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { employeeKind, escapeHtml, fmtDur, hexToRgba, sanitizeTitle } from './text';
+import { employeeKind, escapeHtml, fmtDur, fmtMs, hexToRgba, sanitizeTitle } from './text';
 
 describe('text helpers', () => {
   it('escapes HTML', () => {
@@ -23,6 +23,12 @@ describe('text helpers', () => {
     expect(fmtDur(3)).toBe('3.0d');
     expect(fmtDur(-3)).toBe('−3.0d');
     expect(fmtDur(0.5)).toBe('12h');
+  });
+
+  it('formats millisecond durations for ops stats', () => {
+    expect(fmtMs(null)).toBe('—');
+    expect(fmtMs(3 * 86400000)).toBe('3.0d');
+    expect(fmtMs(12 * 3600000)).toBe('12h');
   });
 
   it('converts hex to rgba', () => {

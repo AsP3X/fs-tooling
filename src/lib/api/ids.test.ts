@@ -14,6 +14,11 @@ describe('parseRecordRef', () => {
   it('returns null when there is no id', () => {
     expect(parseRecordRef('/a/tickets')).toBeNull();
   });
+
+  it('ignores a ticket id that only appears in the query string', () => {
+    expect(parseRecordRef('https://x.freshservice.com/a/tickets?next=/a/tickets/99')).toBeNull();
+    expect(parseRecordRef('/a/tickets?return=/tickets/99')).toBeNull();
+  });
 });
 
 describe('ticketHrefFor', () => {

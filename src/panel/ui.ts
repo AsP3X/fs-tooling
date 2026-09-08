@@ -3,26 +3,26 @@
 
 import { listRangeResults } from '../lib/api/enrich';
 import { contextLabel, detectContext } from '../lib/context';
-import { HISTORY_KEY, HOST_DEFAULT_INSET_PX } from '../lib/constants';
+import { HOST_DEFAULT_INSET_PX } from '../lib/constants';
 import { formatStart } from '../lib/dates';
 import { accentColor } from '../lib/filters';
 import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
-import { loadHistory, saveSnapshot } from '../lib/history';
 import { savedPoint } from '../lib/settings';
 import { collectRows } from '../lib/rows';
 import { clearApiKey, getApiKey, hasExtensionRuntime, maskApiKey, setApiKey } from '../lib/secrets';
-import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastReportMeta, getLastReportables, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
-import { buildReport } from '../lib/stats';
-import { escapeHtml, fmtDur } from '../lib/text';
+import { assignRoot, getLastRangeMeta, getLastRangeResults, getLastStats, getModuleId, getSettings, hasApiKeyPresent, page, patchPage, patchRoot, setApiKeyPresent, setLastRangeResults, setModuleId } from '../lib/state';
+import { escapeHtml } from '../lib/text';
 import type { FilterRule, ModuleSetting, PageSettings, SortDir, SortKey } from '../lib/types';
-import { markTickets, openMarked, paintList } from '../page/paint';
+import { markTickets, openMarked } from '../page/paint';
+import { trackCurrentTicket } from '../page/ops-track';
 import { runtime } from '../page/runtime';
 import { applyPageStyles } from '../page/styles';
 import { syncStartColumnHeader } from '../page/start-column';
 import { applyFeatureVisibility, syncRegisteredFeatures } from './features';
 import { initAbout } from './about';
 import { initManage } from './manage';
+import { initStats } from './stats';
 import { initUpdateToast } from './update-toast';
 import panelCss from './panel.css?raw';
 import panelHtml from './panel.html?raw';
@@ -37,65 +37,20 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   };
   const panel = $('panel');
   const fab = $('fab');
-  const report = $('report');
   const settingsPanel = $('settingsPanel');
   const resultsPanel = $('resultsPanel');
   const filterPanel = $('filterPanel');
+  const statsPanel = $('statsPanel');
   const chromeRow = $('chromeRow');
   const about = initAbout(shadow);
-  let reportOpen = false;
   let settingsOpen = false;
   let resultsOpen = false;
   let filterOpen = false;
+  let statsOpen = false;
   let panelPin: { x: number; y: number } | null = null;
   const didDrag = { current: false };
   let rangeDraft: { startFrom: string | null; startTo: string | null } | null = null;
   let rangeDraftModule: ReturnType<typeof getModuleId> | null = null;
-
-  function barsHtml(buckets: Array<{ key: string; n: number }>): string {
-    const max = Math.max(1, ...buckets.map((b) => b.n));
-    return `<div class="bars">${buckets.map((b) => `<div class="bar-row"><span>${escapeHtml(b.key)}</span><div class="bar-track"><div class="bar-fill" style="width:${(b.n / max) * 100}%"></div></div><span>${b.n}</span></div>`).join('')}</div>`;
-  }
-
-  function tableHtml(rows: Array<{ name: string; n: number }>): string {
-    if (!rows.length) return '<p class="note">No groups on this list.</p>';
-    return `<table class="split"><thead><tr><th>Group</th><th class="num">n</th></tr></thead><tbody>${rows.slice(0, 12).map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.n}</td></tr>`).join('')}</tbody></table>`;
-  }
-
-  function renderReport(): void {
-    const bundle = getLastReportables();
-    const meta = getLastReportMeta();
-    const r = buildReport(bundle.length ? bundle : collectRows(), getModuleId());
-    const hist = loadHistory().filter((h) => h.module === r.module);
-    $('reportTitle').textContent = r.module === 'journeys' ? 'Journey statistics' : 'Ticket statistics';
-    const src = meta.fromApi ? (meta.truncated ? 'API · capped at 500' : 'API') : 'this page';
-    $('reportSub').textContent = `${r.n} rows · ${src} · ${hist.length} snapshots · names not stored`;
-    const extra = r.module === 'journeys' ? `
-      <div class="kpi">
-        <div class="stat"><b>${r.awaiting}</b><span>Awaiting info</span></div>
-        <div class="stat"><b>${r.processing}</b><span>Being processed</span></div>
-        <div class="stat"><b>${r.startWeek}</b><span>Start in 7d</span></div>
-        <div class="stat"><b>${r.startPast}</b><span>Start already passed</span></div>
-      </div>
-      <div class="section-title">Child-ticket progress</div>
-      ${barsHtml(r.progBuckets)}
-      <div class="section-title">Internal vs external</div>
-      ${tableHtml(r.byKind)}
-      <div class="kpi">
-        <div class="stat"><b>${r.progress.avg == null ? '—' : Math.round(r.progress.avg) + '%'}</b><span>Avg child progress</span></div>
-        <div class="stat"><b>${fmtDur(r.startIn.med)}</b><span>Median days to start</span></div>
-      </div>` : `
-      <div class="kpi">
-        <div class="stat"><b>${fmtDur(r.idle.avg)}</b><span>Idle avg</span></div>
-        <div class="stat"><b>${fmtDur(r.idle.p90)}</b><span>Idle p90</span></div>
-      </div>`;
-    $('reportBody').innerHTML = `${extra}
-      <div class="section-title">${r.module === 'journeys' ? 'Days in current status' : 'Idle buckets'}</div>
-      ${barsHtml(r.idleBuckets)}
-      <div class="section-title">By status</div>
-      ${tableHtml(r.byStatus)}
-      <p class="note">${meta.fromApi ? 'Idle uses ticket updated_at from the API when a key is saved. ' : 'Journeys use the badge “since N days” when present, otherwise created-on. '}Person names are stripped from stored labels.</p>`;
-  }
 
   // Human: Range overlay — our table only. Does not hide or rebuild the live Freshservice list.
   // Agent: READS getLastRangeResults; WRITES #resultsBody. CALLS listRangeResults from loadAndRenderRange.
@@ -175,7 +130,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       return;
     }
     resultsOpen = true;
-    reportOpen = false;
+    statsOpen = false;
+    filterOpen = false;
     settingsOpen = false;
     if (getSettings().collapsed) patchRoot({ collapsed: false });
     syncUI();
@@ -191,7 +147,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     patchPage({ startFrom: next.startFrom, startTo: next.startTo, activePreset: null });
     if (active && openTable) {
       resultsOpen = true;
-      reportOpen = false;
+      statsOpen = false;
+      filterOpen = false;
       settingsOpen = false;
       if (getSettings().collapsed) patchRoot({ collapsed: false });
     } else if (!active) {
@@ -260,13 +217,13 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     else placeDefault();
   }
 
-  function placeFilterSide(): void {
+  function placeSidePanel(sideEl: HTMLElement): void {
     const main = panel.getBoundingClientRect();
     const need = 488;
     const rightSpace = window.innerWidth - main.right;
     const leftSpace = main.left;
     const side = rightSpace >= need || rightSpace >= leftSpace ? 'right' : 'left';
-    filterPanel.style.order = side === 'left' ? '0' : '2';
+    sideEl.style.order = side === 'left' ? '0' : '2';
     panel.style.order = '1';
     chromeRow.dataset.side = side;
   }
@@ -275,11 +232,11 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   // Agent: WRITES host left/top so panel.getBoundingClientRect matches panelPin, then clamps.
   function pinChrome(): void {
     void host.offsetWidth;
-    if (panel.classList.contains('hide') || !filterOpen) {
+    if (panel.classList.contains('hide') || (!filterOpen && !statsOpen)) {
       applySavedPosition();
       return;
     }
-    placeFilterSide();
+    placeSidePanel(filterOpen ? filterPanel : statsPanel);
     void host.offsetWidth;
     const main = panel.getBoundingClientRect();
     if (!panelPin) panelPin = { x: main.left, y: main.top };
@@ -301,12 +258,15 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     $('openStale').textContent = totalMarked ? `Open ${totalMarked} marked` : 'Open marked tabs';
   }
   runtime.renderStats = renderStats;
-  runtime.onPageChange = () => { syncUI(); };
+  runtime.onPageChange = () => {
+    syncUI();
+    void trackCurrentTicket().then(() => { if (statsOpen) stats.sync(); });
+  };
   runtime.revealPanel = () => {
-    reportOpen = false;
     settingsOpen = false;
     resultsOpen = false;
     filterOpen = false;
+    statsOpen = false;
     updateRoot({ collapsed: false });
     requestAnimationFrame(() => applySavedPosition());
   };
@@ -450,22 +410,26 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
       : 'hidden';
     const open = settings.uiOpen || {};
     shadow.querySelectorAll<HTMLElement>('[data-sec]').forEach((el) => el.classList.toggle('open', !!open[el.dataset.sec || '']));
-    const overlay = reportOpen || settingsOpen || resultsOpen;
-    if (overlay || settings.collapsed) filterOpen = false;
+    const overlay = settingsOpen || resultsOpen;
+    if (overlay || settings.collapsed) {
+      filterOpen = false;
+      statsOpen = false;
+    }
     panel.classList.toggle('hide', settings.collapsed || overlay);
     fab.classList.toggle('show', settings.collapsed && !overlay);
-    report.classList.toggle('show', reportOpen && !settings.collapsed);
     settingsPanel.classList.toggle('hide', !settingsOpen || settings.collapsed);
     resultsPanel.classList.toggle('show', resultsOpen && !settings.collapsed);
     resultsPanel.classList.toggle('hide', !resultsOpen || settings.collapsed);
     filterPanel.classList.toggle('hide', !filterOpen || settings.collapsed || overlay);
+    statsPanel.classList.toggle('hide', !statsOpen || settings.collapsed || overlay);
     renderFilterChips();
     renderSortKeys();
     if (filterOpen) manage.sync();
+    if (statsOpen) stats.sync();
     applyFeatureVisibility(shadow, ctx);
     syncRegisteredFeatures($('featureMount'), ctx);
     applyPageStyles();
-    if (filterOpen && !panel.classList.contains('hide')) pinChrome();
+    if ((filterOpen || statsOpen) && !panel.classList.contains('hide')) pinChrome();
     else applySavedPosition();
     renderStats();
   }
@@ -485,6 +449,10 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   const manage = initManage(shadow, {
     onChange: (filters) => applyFilters(filters),
     onLayout: () => pinChrome(),
+  });
+  const stats = initStats(shadow, {
+    onLayout: () => pinChrome(),
+    onRefresh: () => trackCurrentTicket(location, document, { force: true }),
   });
 
   function makeDraggable(handle: HTMLElement): void {
@@ -525,7 +493,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     });
   }
   makeDraggable($('dragHandle'));
-  makeDraggable($('reportHandle'));
+  makeDraggable($('statsHandle'));
   makeDraggable($('settingsHandle'));
   makeDraggable($('resultsHandle'));
   makeDraggable($('filterHandle'));
@@ -588,8 +556,8 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     const main = panel.getBoundingClientRect();
     panelPin = { x: main.left, y: main.top };
     filterOpen = true;
+    statsOpen = false;
     settingsOpen = false;
-    reportOpen = false;
     resultsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
@@ -611,17 +579,22 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     updateRoot({ collapsed: false });
   });
   $('openStale').addEventListener('click', openMarked);
-  $('openStats').addEventListener('click', () => {
-    reportOpen = true;
+  const openStatsPanel = (): void => {
+    const main = panel.getBoundingClientRect();
+    panelPin = { x: main.left, y: main.top };
+    statsOpen = true;
+    filterOpen = false;
     settingsOpen = false;
     resultsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
-    void paintList(document, false).then(() => renderReport());
-  });
-  $('closeReport').addEventListener('click', (e) => {
+    void trackCurrentTicket().then(() => stats.sync());
+  };
+  $('openStats').addEventListener('click', openStatsPanel);
+  $('openStatsDetail').addEventListener('click', openStatsPanel);
+  $('closeStats').addEventListener('click', (e) => {
     e.stopPropagation();
-    reportOpen = false;
+    statsOpen = false;
     syncUI();
   });
   const deskBtn = $('openDeskSettings');
@@ -657,7 +630,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     e.stopPropagation();
     settingsOpen = true;
     filterOpen = false;
-    reportOpen = false;
+    statsOpen = false;
     resultsOpen = false;
     if (getSettings().collapsed) updateRoot({ collapsed: false });
     else syncUI();
@@ -685,16 +658,6 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     if (!confirm('Remove the saved API key from this browser?')) return;
     apiKeyInput.value = '';
     void clearApiKey().then(refreshApiKeyStatus);
-  });
-  $('saveSnap').addEventListener('click', () => {
-    const bundle = getLastReportables();
-    saveSnapshot(buildReport(bundle.length ? bundle : collectRows(), getModuleId()));
-    renderReport();
-  });
-  $('clearHist').addEventListener('click', () => {
-    if (!confirm('Clear saved statistics snapshots?')) return;
-    localStorage.removeItem(HISTORY_KEY);
-    renderReport();
   });
   $('rescan').addEventListener('click', () => markTickets({ force: true }));
 
@@ -742,5 +705,6 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   applyPageStyles();
   syncUI();
   void refreshApiKeyStatus();
+  void trackCurrentTicket().then(() => { if (statsOpen) stats.sync(); });
   initUpdateToast(shadow, () => applySavedPosition());
 }
