@@ -1,4 +1,4 @@
-// Human: GitHub Releases update check. Compare the installed addon version to /releases/latest; ignore CI build suffixes.
+// Human: GitHub Releases update check. Compare the installed addon version to /releases/latest; ignore historical CI build suffixes.
 // Agent: PURE parse/compare. fetchLatestRelease CALLS the service worker (sth.updates.check). dismissUpdate WRITES sth.updates.dismissed via the worker. Never hits GitHub from the content script.
 
 import { hasExtensionRuntime } from './secrets';
@@ -48,8 +48,8 @@ function field(rec: Record<string, unknown>, ...keys: string[]): string {
 }
 
 /**
- * Addon versions are `major.minor.patch` (Chrome/Edge manifest). CI tags are `v2.7.0-42`;
- * the `-42` is a build id of the same version, not a newer release.
+ * Addon versions are `major.minor.patch` (Chrome/Edge manifest). Release tags are `v2.8.5`.
+ * Older CI tags were `v2.7.0-42`; the `-42` is a build id of the same version, not a newer release.
  */
 export function parseAddonVersion(raw: string | null | undefined): string | null {
   const text = String(raw || '').trim().replace(/^v/i, '');

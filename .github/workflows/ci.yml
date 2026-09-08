@@ -1,5 +1,5 @@
 # Human: Pull-request checks — lint, typecheck, unit tests, and a production extension build.
-# Agent: RUNS on push/PR to master and dev; REQUIRES Node 22; FAILS if npm run check fails.
+# Agent: RUNS on push/PR to master and dev. Does not publish releases (see release.yml). REQUIRES Node 22; FAILS if npm run check fails.
 
 name: CI
 
@@ -9,10 +9,14 @@ on:
   pull_request:
     branches: [master, dev]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Lint, test, build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

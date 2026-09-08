@@ -30,9 +30,19 @@ npm run build
 
 Or in one step: `npm run check`.
 
-CI runs the same checks on pull requests (see `.github/workflows/ci.yml`).
+CI runs the same checks on pull requests to `master` and `dev` (see `.github/workflows/ci.yml`). It does not publish a GitHub Release.
 
 Load the unpacked build from `dist/sth-extension/` — details in [Local development](docs/local-development.md).
+
+## Releases
+
+`.github/workflows/release.yml` publishes `sth-extension.zip` / `.tar.gz` and the userscript when a **version tag** is pushed that points at **`master`**.
+
+1. Merge the release line into `master` with `package.json` `version` bumped (for example `2.8.5`).
+2. Tag that commit and push the tag: `git tag v2.8.5 && git push origin v2.8.5`.
+3. The tag must be `vMAJOR.MINOR.PATCH` and must match `package.json`. Tags on `dev` or feature branches do not release.
+
+Do not push a tag until `master` contains the intended commit. The workflow does not mint tags; it only creates a GitHub Release for the tag you pushed.
 
 ## Generated artifacts (do not commit)
 

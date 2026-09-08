@@ -62,3 +62,13 @@ Output:
 ## Version
 
 `package.json` `version` is the source of truth. The packager stamps it onto `manifest.json` and the userscript header. Bump it when you intend a user-visible release.
+
+GitHub Releases are created only when a matching version tag is pushed on `master` (not on `dev` or feature branches):
+
+```bash
+# on the master commit whose package.json version is 2.8.5
+git tag v2.8.5
+git push origin v2.8.5
+```
+
+The tag must be `v` plus the `package.json` version (`vMAJOR.MINOR.PATCH`). See [Contributing](../CONTRIBUTING.md#releases).
