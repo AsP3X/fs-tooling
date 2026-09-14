@@ -77,6 +77,10 @@ To add a new context-specific card without restyling the panel:
 
 Each module has an ordered list of **filters** (defaults + custom). Each filter has a color, All/Any matching, and an extensible `criteria` bag. Criteria are registered in `src/lib/filters.ts` (`registerCriterion` / `registerFilterPage`) so a new list type can add dimensions without rewriting the panel.
 
+Ticket defaults that match a **status** (Open, Pending, 3rd party) use a **Unicode regex** (`statusPattern`, flags `iu`) instead of an English label. The stock patterns are language-insensitive word stems (German, English, and other common Freshservice locales). Users can edit the regex in Manage; **Default regex** restores the built-in. Exact status tags still work for custom rules.
+
+List columns are keyed by `data-name`, so Freshservice **column reorder** does not break scraping. Hidden columns that a filter needs (Priority, Due date, Agent, Updated, …) produce a warning when that filter is turned on, unless an API key can fill the same fields.
+
 Enabled filters run **in list order**. The first match paints the row in that filter’s color. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
 
 ## Ticket ops (statistics)
@@ -99,7 +103,7 @@ Editing a default and saving forks a custom copy (`sourceId`) in the same slot; 
 `itemMatches` in `src/lib/match.ts`:
 
 - **OR / AND** still skip empty dimensions. **Exclude statuses** always cuts those statuses (it is not an Any dimension). **Invert** paints rows that miss the rule instead of those that match.
-- Tickets: idle band, created age, include/exclude status, **priority** (Low–Urgent), requester, subject phrase, due / overdue, escalated, unassigned. Priority is its own editor group on ticket lists.
+- Tickets: idle band, created age, include/exclude status, **status regex**, **priority** (Low–Urgent, locale labels and `priority-N` classes), requester, subject phrase or **subject regex**, due / overdue, escalated, unassigned. Priority is its own editor group on ticket lists.
 - Journeys: the same age/status/subject rules, plus kind (Internal/External), initiator, start dates, start already passed or within N days, and a child-progress band.
 - **Date range** does not participate. It only fills the Range results overlay.
 

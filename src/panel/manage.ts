@@ -1,8 +1,9 @@
 // Human: Side filter dialog — ordered colored rules. Saving a default forks a restorable custom copy.
 // Agent: READS page().filters. CALLS onChange with a new filters array. CALLS onLayout after editor size changes.
 
+import { missingColumnsForRule, missingColumnsMessage, visibleColumnNames } from '../lib/columns';
 import { blankFilter, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, restoreFromSource } from '../lib/filters';
-import { getModuleId, page } from '../lib/state';
+import { getModuleId, hasApiKeyPresent, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
 import type { FilterRule, MatchMode } from '../lib/types';
 import { groupSummary, mountCriterion } from './criteria';
@@ -91,7 +92,7 @@ export function initManage(
         block.className = 'editor-field';
         mountCriterion(block, spec.id, rule.criteria, moduleId, (patch) => {
           patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
-        });
+        }, rule);
         body.appendChild(block);
       });
       box.querySelector('.tagbox-head')?.addEventListener('click', () => {
@@ -172,24 +173,51 @@ export function initManage(
     commit(list.map((r) => (r.id === id ? { ...r, ...partial, criteria: partial.criteria || r.criteria } : r)));
   }
 
+  const columnWarn = (rule: FilterRule): string => {
+    const missing = missingColumnsForRule(rule, visibleColumnNames(document), hasApiKeyPresent());
+    return missingColumnsMessage(missing);
+  };
+
   const renderList = (): void => {
     const filters = page().filters || [];
-    list.innerHTML = filters.map((rule, i) => `
-      <div class="filter-row" data-id="${escapeHtml(rule.id)}">
+    const warnEl = shadow.getElementById('manageFilterWarn');
+    const enabledWarnings = filters
+      .filter((r) => r.enabled)
+      .map(columnWarn)
+      .filter(Boolean);
+    if (warnEl) {
+      warnEl.hidden = !enabledWarnings.length;
+      warnEl.textContent = enabledWarnings[0] || '';
+    }
+    list.innerHTML = filters.map((rule, i) => {
+      const warn = columnWarn(rule);
+      return `
+      <div class="filter-row${warn ? ' warn' : ''}" data-id="${escapeHtml(rule.id)}" ${warn ? `title="${escapeHtml(warn)}"` : ''}>
         <span class="filter-swatch" style="background:${escapeHtml(rule.color)}"></span>
         <span class="filter-name">${escapeHtml(rule.name)}</span>
-        <span class="filter-tags">${rule.builtin ? '<span class="tag-count">Default</span>' : isForkOfDefault(rule) ? '<span class="tag-count">Custom</span>' : ''}${rule.invert ? '<span class="tag-count">Invert</span>' : ''}</span>
+        <span class="filter-tags">${rule.builtin ? '<span class="tag-count">Default</span>' : isForkOfDefault(rule) ? '<span class="tag-count">Custom</span>' : ''}${rule.invert ? '<span class="tag-count">Invert</span>' : ''}${warn ? '<span class="tag-count warn">Needs column</span>' : ''}</span>
         <button type="button" class="icon-btn" data-act="up" ${i === 0 ? 'disabled' : ''} title="Higher priority">↑</button>
         <button type="button" class="icon-btn" data-act="down" ${i === filters.length - 1 ? 'disabled' : ''} title="Lower priority">↓</button>
         <button type="button" class="toggle${rule.enabled ? ' on' : ''}" data-act="on" title="Active"><i></i></button>
         <button type="button" class="ghost" data-act="edit" style="height:28px;padding:0 8px">Edit</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     list.querySelectorAll<HTMLElement>('.filter-row').forEach((row) => {
       const id = row.dataset.id || '';
       row.querySelector('[data-act="up"]')?.addEventListener('click', () => commit(moveFilter(page().filters || [], id, -1)));
       row.querySelector('[data-act="down"]')?.addEventListener('click', () => commit(moveFilter(page().filters || [], id, 1)));
       row.querySelector('[data-act="on"]')?.addEventListener('click', () => {
-        commit((page().filters || []).map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)));
+        const cur = (page().filters || []).find((r) => r.id === id);
+        const nextEnabled = !cur?.enabled;
+        const next = (page().filters || []).map((r) => (r.id === id ? { ...r, enabled: nextEnabled } : r));
+        if (nextEnabled && cur) {
+          const msg = columnWarn({ ...cur, enabled: true });
+          if (msg && warnEl) {
+            warnEl.hidden = false;
+            warnEl.textContent = msg;
+          }
+        }
+        commit(next);
       });
       row.querySelector('[data-act="edit"]')?.addEventListener('click', () => {
         editingId = id;
@@ -207,7 +235,10 @@ export function initManage(
         editor.removeAttribute('data-editing');
       } else {
         const active = shadow.activeElement;
-        const typing = !!(active && editor.contains(active) && active instanceof HTMLInputElement && active.type === 'text');
+        const typing = !!(active && editor.contains(active) && (
+          active instanceof HTMLTextAreaElement
+          || (active instanceof HTMLInputElement && (active.type === 'text' || active.type === 'password'))
+        ));
         if (!typing || editor.dataset.editing !== rule.id) {
           renderEditor(rule);
           editor.dataset.editing = rule.id;

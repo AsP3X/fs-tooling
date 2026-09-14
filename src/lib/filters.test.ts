@@ -85,8 +85,9 @@ describe('mergeFilterList builtins', () => {
     const open = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'open-idle');
     expect(open?.name).toBe('Open');
     expect(open?.criteria.idleDays).toBeUndefined();
-    expect(open?.criteria.statuses).toEqual(['Open']);
+    expect(open?.criteria.statusPattern).toBeTruthy();
     expect(ruleMatches(item({ idleDays: 0, status: 'Open' }), open!, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ idleDays: 0, status: 'Offen' }), open!, 'tickets')).toBe(true);
     expect(ruleMatches(item({ idleDays: 10, status: 'Pending' }), open!, 'tickets')).toBe(false);
   });
 
@@ -268,6 +269,28 @@ describe('new criteria', () => {
     expect(list.find((r) => r.id === 'urgent')?.criteria.priorities).toEqual([4]);
     expect(list.find((r) => r.id === 'high')?.enabled).toBe(false);
     expect(list.find((r) => r.id === 'high')?.criteria.priorities).toEqual([3]);
+  });
+
+  it('status regex matches DE/EN and ignores invalid patterns', () => {
+    const open = rule({ id: 'o', name: 'O', criteria: { statusPattern: 'open|offen' } });
+    expect(ruleMatches(item({ status: 'Offen' }), open, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ status: 'Pending' }), open, 'tickets')).toBe(false);
+    const bad = rule({ id: 'b', name: 'B', criteria: { statusPattern: '(unclosed' } });
+    expect(ruleMatches(item({ status: 'Open' }), bad, 'tickets')).toBe(false);
+    const third = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'w3p');
+    expect(ruleMatches(item({ idleDays: 5, status: 'Warten auf Drittanbieter' }), third!, 'tickets')).toBe(true);
+  });
+
+  it('subject regex is Unicode-aware', () => {
+    const r = rule({ id: 's', name: 'S', criteria: { subjectPattern: String.raw`\p{L}+phone` } });
+    expect(ruleMatches(item({ subject: 'iPhone', label: 'iPhone' }), r, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ subject: 'Laptop', label: 'Laptop' }), r, 'tickets')).toBe(false);
+  });
+
+  it('subject regex anchors apply per field, not a joined haystack', () => {
+    const r = rule({ id: 's', name: 'S', criteria: { subjectPattern: '^Laptop$' } });
+    expect(ruleMatches(item({ subject: 'Laptop', label: 'Laptop · #12' }), r, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ subject: 'Need Laptop now', label: 'Need Laptop now' }), r, 'tickets')).toBe(false);
   });
 
   it('priority extra matches any selected level', () => {

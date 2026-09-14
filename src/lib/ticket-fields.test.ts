@@ -12,6 +12,19 @@ describe('parsePriority', () => {
     expect(parsePriority('icon priority_high')).toBe(3);
     expect(parsePriority('nope')).toBeNull();
   });
+
+  it('maps German and other-locale labels', () => {
+    expect(parsePriority('Dringend')).toBe(4);
+    expect(parsePriority('Hoch')).toBe(3);
+    expect(parsePriority('Mittel')).toBe(2);
+    expect(parsePriority('Niedrig')).toBe(1);
+  });
+
+  it('does not treat stems inside other words as a priority', () => {
+    expect(parsePriority('below')).toBeNull();
+    expect(parsePriority('highlight')).toBeNull();
+    expect(parsePriority('immediate')).toBeNull();
+  });
 });
 
 describe('priorityLabel', () => {
@@ -30,6 +43,7 @@ describe('agentCellUnassigned', () => {
     expect(agentCellUnassigned('', true)).toBe(true);
     expect(agentCellUnassigned('—', true)).toBe(true);
     expect(agentCellUnassigned('Unassigned', true)).toBe(true);
+    expect(agentCellUnassigned('Nicht zugewiesen', true)).toBe(true);
     expect(agentCellUnassigned('Pat', true)).toBe(false);
   });
 });

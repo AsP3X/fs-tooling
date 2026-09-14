@@ -36,6 +36,10 @@ export interface FilterCriteria {
   kinds?: string[];
   initiators?: string[];
   subjectIncludes?: string[];
+  /** Unicode regex (`iu`) tested against the status cell. Empty = off. */
+  statusPattern?: string | null;
+  /** Unicode regex (`iu`) tested against subject and label. Empty = off. */
+  subjectPattern?: string | null;
   dueWithin?: number | null;
   escalated?: boolean | null;
   priorities?: number[];

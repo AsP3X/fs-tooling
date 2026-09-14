@@ -115,4 +115,47 @@ describe('collectRows', () => {
     `;
     expect(collectRows(document, NOW)[0].status).toBe('Open');
   });
+
+  it('reads German status-age labels', () => {
+    document.body.innerHTML = `
+      <table>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="subject"><a class="subject-cell" href="/a/tickets/3">Hi</a></td>
+            <td data-name="updated_at_date"><span data-test-id="date-cell" title="01 Sep, 2026, 12:00">1 Sep</span></td>
+            <td><button class="status-list-trigger" aria-label="Offen seit 11 Tagen"></button></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const [row] = collectRows(document, NOW);
+    expect(row.idleDays).toBe(11);
+    expect(row.status).toBe('Offen');
+  });
+
+  it('reads columns after they are reordered or a due column is omitted', () => {
+    document.body.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th data-name="priority">P</th>
+            <th data-name="ticket_subject">S</th>
+            <th data-name="status">St</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="et-tr">
+            <td data-name="priority"><span title="Hoch">Hoch</span></td>
+            <td data-name="ticket_subject"><a class="subject-cell" href="/a/tickets/4">Hi</a></td>
+            <td data-name="status">Offen</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    const [row] = collectRows(document, NOW);
+    expect(row.priority).toBe(3);
+    expect(row.status).toBe('Offen');
+    expect(row.dueIn).toBeNull();
+    expect(row.unassigned).toBeNull();
+  });
 });

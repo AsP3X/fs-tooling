@@ -39,6 +39,12 @@ describe('parseTicketDate', () => {
     expect(d?.getHours()).toBe(10);
   });
 
+  it('parses German month abbreviations', () => {
+    const d = parseTicketDate('14 Okt, 2026, 10:00');
+    expect(d?.getMonth()).toBe(9);
+    expect(d?.getDate()).toBe(14);
+  });
+
   it('parses day-first numeric dates', () => {
     const d = parseTicketDate('14-09-2026 08:30');
     expect(d?.getMonth()).toBe(8);

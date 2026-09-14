@@ -24,8 +24,8 @@ export const OPS_SAMPLE_MS = 45 * 1000;
 export const MAX_OPS_OPENS = 80;
 
 export const MONTHS: Record<string, number> = {
-  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  jan: 0, feb: 1, mar: 2, mär: 2, mrz: 2, apr: 3, may: 4, mai: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, okt: 9, nov: 10, dec: 11, dez: 11,
 };
 
 export const BUCKETS = [

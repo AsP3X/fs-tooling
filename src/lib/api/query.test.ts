@@ -75,6 +75,18 @@ describe('buildTicketFilterQuery', () => {
     expect(swapped).toContain("updated_at:>'2026-08-21'");
   });
 
+  it('maps a status regex onto known API status ids', () => {
+    const q = buildRuleTicketQuery(
+      {
+        id: 'x', name: 'X', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'or',
+        criteria: { statusPattern: 'open|offen' },
+      },
+      names,
+      now,
+    );
+    expect(q).toBe('status:2');
+  });
+
   it('omits inverted rules from the API query', () => {
     const q = buildRuleTicketQuery(
       {

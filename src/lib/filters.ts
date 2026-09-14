@@ -1,6 +1,7 @@
 // Human: Ordered, colored highlight filters. First enabled match wins. Criteria are registered so new pages/dimensions can plug in.
 // Agent: PURE. mergeFilterList READS builtins + stored rules. ruleMatches CALLS registered criterion.evaluate. Empty/unknown criteria are skipped. invert flips a hit after at least one dimension is active.
 
+import { DEFAULT_PATTERNS, patternMatches } from './patterns';
 import type { FilterCriteria, FilterRule, Matchable, MatchMode, ModuleId, PageSettings, Preset } from './types';
 
 export type FilterModule = ModuleId | 'global';
@@ -22,12 +23,12 @@ export interface FilterPageDef {
 
 export const CRITERION_GROUPS: Array<{ id: CriterionGroupId; label: string; hint?: string }> = [
   { id: 'age', label: 'Age' },
-  { id: 'status', label: 'Status' },
-  { id: 'priority', label: 'Priority', hint: 'Needs the Priority column on the list, or an API key.' },
+  { id: 'status', label: 'Status', hint: 'Exact tags still work. A Unicode regex matches German, English, and other locales.' },
+  { id: 'priority', label: 'Priority', hint: 'Needs the Priority column on the list, or an API key. Columns can be reordered or hidden.' },
   { id: 'people', label: 'People' },
-  { id: 'ticket', label: 'Due & SLA', hint: 'Uses list columns when visible, or the API when a key is saved.' },
+  { id: 'ticket', label: 'Due & SLA', hint: 'Uses list columns when visible, or the API when a key is saved. Hidden columns warn when you turn the filter on.' },
   { id: 'schedule', label: 'Start & progress' },
-  { id: 'text', label: 'Subject' },
+  { id: 'text', label: 'Subject', hint: 'Phrase tags or a Unicode regex against the subject.' },
 ];
 
 const criteria: CriterionDef[] = [];
@@ -108,6 +109,8 @@ export function criterionActive(id: string, c: FilterCriteria): boolean {
     case 'startWithin': return c.startPassed === true || asFiniteNumber(c.startWithin) != null;
     case 'maxProgress': return asFiniteNumber(c.maxProgress) != null || asFiniteNumber(c.minProgress) != null;
     case 'subjectIncludes': return asStringList(c.subjectIncludes).length > 0;
+    case 'statusPattern': return String(c.statusPattern || '').trim().length > 0;
+    case 'subjectPattern': return String(c.subjectPattern || '').trim().length > 0;
     default: return false;
   }
 }
@@ -264,6 +267,25 @@ registerCriterion({
   },
 });
 
+registerCriterion({
+  id: 'statusPattern',
+  modules: ['tickets', 'journeys'],
+  group: 'status',
+  evaluate: (item, c) => patternMatches(c.statusPattern, item.status),
+});
+
+registerCriterion({
+  id: 'subjectPattern',
+  modules: ['tickets', 'journeys'],
+  group: 'text',
+  evaluate: (item, c) => {
+    const src = String(c.subjectPattern || '').trim();
+    if (!src) return null;
+    // Test fields separately so ^ / $ anchors still work (do not join with a newline).
+    return patternMatches(src, item.subject) === true || patternMatches(src, item.label) === true;
+  },
+});
+
 function makeRule(partial: Omit<FilterRule, 'builtin' | 'enabled' | 'invert'> & {
   builtin?: boolean;
   enabled?: boolean;
@@ -291,15 +313,15 @@ registerFilterPage({
     }),
     makeRule({
       id: 'open-idle', name: 'Open', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { statuses: ['Open'] },
+      criteria: { statusPattern: DEFAULT_PATTERNS.statusOpen },
     }),
     makeRule({
       id: 'pending-3', name: 'Pending 3d', builtin: true, color: '#6a1b9a', matchMode: 'and',
-      criteria: { idleDays: 3, statuses: ['Pending'] },
+      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusPending },
     }),
     makeRule({
       id: 'w3p', name: '3rd party', builtin: true, color: '#1565c0', matchMode: 'and',
-      criteria: { idleDays: 3, statuses: ['Waiting for third party'] },
+      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusThirdParty },
     }),
     makeRule({
       id: 'overdue', name: 'Overdue', builtin: true, color: '#c62828', matchMode: 'or',
@@ -335,11 +357,11 @@ registerFilterPage({
     }),
     makeRule({
       id: 'await-3', name: 'Awaiting 3d', builtin: true, color: '#e65100', matchMode: 'and',
-      criteria: { idleDays: 3, statuses: ['Awaiting Information'] },
+      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusAwaitingInfo },
     }),
     makeRule({
       id: 'proc-14', name: 'Processing 14d', builtin: true, color: '#6a1b9a', matchMode: 'and',
-      criteria: { idleDays: 14, statuses: ['Being Processed'] },
+      criteria: { idleDays: 14, statusPattern: DEFAULT_PATTERNS.statusBeingProcessed },
     }),
     makeRule({
       id: 'low-prog', name: 'Low progress', builtin: true, color: '#c62828', matchMode: 'or',
@@ -366,6 +388,20 @@ export function builtinFilters(moduleId: ModuleId): FilterRule[] {
 
 export function pageDefaultColor(moduleId: ModuleId): string {
   return pages.get(moduleId)?.defaultColor || '#e65100';
+}
+
+const BUILTIN_STATUS_PATTERNS: Record<string, string> = {
+  'open-idle': DEFAULT_PATTERNS.statusOpen,
+  'pending-3': DEFAULT_PATTERNS.statusPending,
+  w3p: DEFAULT_PATTERNS.statusThirdParty,
+  'await-3': DEFAULT_PATTERNS.statusAwaitingInfo,
+  'proc-14': DEFAULT_PATTERNS.statusBeingProcessed,
+};
+
+/** Default status regex for a builtin or a fork of one. Null when the rule has no stock pattern. */
+export function builtinStatusPattern(rule: FilterRule): string | null {
+  const id = rule.builtin ? rule.id : (rule.sourceId || '');
+  return BUILTIN_STATUS_PATTERNS[id] || null;
 }
 
 export function ruleMatches(

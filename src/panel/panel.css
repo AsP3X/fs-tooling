@@ -54,6 +54,8 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 .seg button.on { background: var(--accent, #e65100); color: #fff; }
 .hint { margin: 0; font-size: 11px; color: #8b949e; line-height: 1.35; }
 .hint.err { color: #ef9a9a; }
+.hint.warn { color: #ffcc80; }
+.tag-count.warn { color: #ffcc80; background: rgba(255, 193, 7, .12); }
 .tagbox-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 0; min-height: 24px; }
 .tagbox-body { display: none; }
 .tagbox.open .tagbox-body { display: grid; gap: 8px; }
@@ -132,6 +134,21 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 .filter-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .chip.filter-chip { display: inline-flex; align-items: center; gap: 6px; }
 .chip.filter-chip .sw { width: 8px; height: 8px; border-radius: 50%; }
+.chip.filter-chip.warn { border-color: #ffcc80; }
+.filter-row.warn .filter-name { color: #ffcc80; }
+#filterEditor textarea.regex {
+  width: 100%;
+  min-height: 56px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: #f2f4f7;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  outline: none;
+  resize: vertical;
+}
 #filterEditor .editor-group { margin-top: 4px; padding: 4px 0 0; }
 #filterEditor .editor-group > .hint { margin-top: 4px; }
 #filterEditor .editor-group .tagbox-body { gap: 8px; }

@@ -6,3 +6,6 @@ node_modules/
 *.tsbuildinfo
 .vite/
 .eslintcache
+
+# Live tenant HTML dumps (PII; never commit)
+DOM-EXPORT

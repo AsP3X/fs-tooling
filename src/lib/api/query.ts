@@ -3,6 +3,7 @@
 
 import { MS_DAY } from '../constants';
 import { asFiniteNumber, asNumberList, enabledFilters } from '../filters';
+import { compileUnicodeRegex } from '../patterns';
 import { normalizeRange, shiftDateKey } from '../range';
 import type { FilterRule, MatchMode, PageSettings } from '../types';
 
@@ -27,6 +28,27 @@ function statusClause(statuses: unknown, nameToId: Map<string, number>): string 
     .map((s) => nameToId.get(String(s).toLowerCase()))
     .filter((id): id is number => id != null);
   return statusIds.map((id) => `status:${id}`).join(' OR ');
+}
+
+/** Map a Unicode status regex onto API status ids by testing each known label. */
+function statusPatternClause(pattern: unknown, nameToId: Map<string, number>): string {
+  const compiled = compileUnicodeRegex(String(pattern || ''));
+  if (!compiled) return '';
+  const ids = new Set<number>();
+  nameToId.forEach((id, name) => {
+    compiled.regex.lastIndex = 0;
+    if (compiled.regex.test(name)) ids.add(id);
+  });
+  return [...ids].map((id) => `status:${id}`).join(' OR ');
+}
+
+function combinedStatusClause(
+  statuses: unknown,
+  pattern: unknown,
+  nameToId: Map<string, number>,
+): string {
+  const parts = [statusClause(statuses, nameToId), statusPatternClause(pattern, nameToId)].filter(Boolean);
+  return parts.join(' OR ');
 }
 
 function combineIdleAndStatus(idle: string | null, statusPart: string, matchMode: MatchMode): string {
@@ -78,7 +100,7 @@ export function buildRuleTicketQuery(
   if (idle) dims.push(idle);
   const created = dateBand('created_at', asFiniteNumber(c.createdDays), asFiniteNumber(c.createdDaysMax), now);
   if (created) dims.push(created);
-  const statusPart = statusClause(c.statuses, nameToId);
+  const statusPart = combinedStatusClause(c.statuses, c.statusPattern, nameToId);
   if (statusPart) dims.push(statusPart);
   const prios = asNumberList(c.priorities).filter((n) => n >= 1 && n <= 4);
   if (prios.length) dims.push(prios.map((id) => `priority:${id}`).join(' OR '));
@@ -101,7 +123,7 @@ export function buildTicketFilterQuery(
     return parts.map((p) => `(${p})`).join(' OR ');
   }
   const idle = `updated_at:<'${idleCutoffDate(cfg.days, now)}'`;
-  const statusPart = statusClause(cfg.statuses, nameToId);
+  const statusPart = combinedStatusClause(cfg.statuses, null, nameToId);
   return combineIdleAndStatus(idle, statusPart, cfg.matchMode === 'and' ? 'and' : 'or');
 }
 

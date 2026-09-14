@@ -2,8 +2,10 @@
 // Agent: READS document DOM. Idle days prefer "since N days" on the status trigger, else Updated, else Created.
 
 import { parseRecordRef } from './api/ids';
+import { LIST_COLUMNS } from './columns';
 import { MS_DAY } from './constants';
 import { ageDays, dateKey, daysUntil, parseStartDate, parseTicketDate } from './dates';
+import { DEFAULT_PATTERNS, parseStatusAgeLabel, patternMatches } from './patterns';
 import { agentCellUnassigned, parsePriority } from './ticket-fields';
 import { employeeKind, sanitizeTitle } from './text';
 import type { Progress, RowItem } from './types';
@@ -47,17 +49,15 @@ export function rowStatus(row: Element): string {
   const fromCell = cleanStatus(cell?.getAttribute('title') || cell?.textContent);
   if (fromCell) return fromCell;
   const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
-  const label = trigger?.getAttribute('aria-label') || '';
-  const since = label.match(/^(.*?)\s+since\s+\d+\s+days?/i);
-  if (since?.[1]) return cleanStatus(since[1]);
+  const aged = parseStatusAgeLabel(trigger?.getAttribute('aria-label') || '');
+  if (aged?.status) return cleanStatus(aged.status);
   return '';
 }
 
 export function rowStatusAge(row: Element): number | null {
   const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
-  const label = trigger?.getAttribute('aria-label') || '';
-  const m = label.match(/since\s+(\d+)\s+days?/i);
-  return m ? Number(m[1]) : null;
+  const aged = parseStatusAgeLabel(trigger?.getAttribute('aria-label') || '');
+  return aged ? aged.days : null;
 }
 
 export function rowProgress(row: Element): Progress {
@@ -75,7 +75,7 @@ export function initiatorName(row: Element): string {
 }
 
 /** First matching td[data-name] so extra ticket columns stay optional. */
-function namedCell(row: Element, names: string[]): HTMLElement | null {
+function namedCell(row: Element, names: readonly string[]): HTMLElement | null {
   for (let i = 0; i < names.length; i += 1) {
     const el = row.querySelector(`td[data-name="${names[i]}"]`);
     if (el instanceof HTMLElement) return el;
@@ -99,7 +99,7 @@ function firstPriority(values: Array<string | null | undefined>): number | null 
 }
 
 export function rowPriority(row: Element): number | null {
-  const cell = namedCell(row, ['priority', 'ticket_priority', 'priority_name']);
+  const cell = namedCell(row, LIST_COLUMNS.priority.aliases);
   if (!cell) return null;
   const nested: string[] = [];
   cell.querySelectorAll('[title], [aria-label], [alt], [data-value], [data-priority]').forEach((el) => {
@@ -124,24 +124,24 @@ export function rowPriority(row: Element): number | null {
 }
 
 export function rowDueDate(row: Element): Date | null {
-  return cellDate(namedCell(row, ['due_by', 'due_by_date', 'due_date', 'fr_due_by']));
+  return cellDate(namedCell(row, LIST_COLUMNS.due.aliases));
 }
 
 export function rowUnassigned(row: Element): boolean | null {
-  const cell = namedCell(row, ['responder', 'agent', 'assigned_to', 'responder_name', 'agent_name']);
+  const cell = namedCell(row, LIST_COLUMNS.assigned.aliases);
   if (!cell) return null;
   const name = String(cell.querySelector('a, .requester-cell-name')?.textContent || cell.textContent || '');
   return agentCellUnassigned(name, true);
 }
 
 export function rowEscalated(row: Element): boolean | null {
-  const cell = namedCell(row, ['is_escalated', 'fr_escalated', 'sla_timer', 'sla_status']);
+  const cell = namedCell(row, LIST_COLUMNS.escalated.aliases);
   if (!cell) return null;
   const text = `${cell.getAttribute('title') || ''} ${cell.textContent || ''}`;
-  if (/escalat/i.test(text)) return true;
+  if (patternMatches(DEFAULT_PATTERNS.escalated, text) === true) return true;
   const raw = text.replace(/\s+/g, ' ').trim().toLowerCase();
-  if (raw === 'yes' || raw === 'true') return true;
-  if (raw === 'no' || raw === 'false' || raw === '—' || raw === '-') return false;
+  if (raw === 'yes' || raw === 'true' || raw === 'ja') return true;
+  if (raw === 'no' || raw === 'false' || raw === 'nein' || raw === '—' || raw === '-') return false;
   return false;
 }
 

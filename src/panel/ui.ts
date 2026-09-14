@@ -5,6 +5,7 @@ import { listRangeResults } from '../lib/api/enrich';
 import { contextLabel, detectContext } from '../lib/context';
 import { HOST_DEFAULT_INSET_PX } from '../lib/constants';
 import { formatStart } from '../lib/dates';
+import { missingColumnsForRule, missingColumnsMessage, visibleColumnNames } from '../lib/columns';
 import { accentColor } from '../lib/filters';
 import { formatRangeLabel, normalizeRange, rangeActive, rangeApplyReady, rangeListingEnabled } from '../lib/range';
 import { detectModule } from '../lib/detect';
@@ -288,17 +289,38 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
   let chipSig = '';
   function renderFilterChips(): void {
     const wrap = $('filterChips');
+    const warnEl = shadow.getElementById('filterWarn');
     const filters = page().filters || [];
-    const sig = filters.map((r) => `${r.id}:${r.enabled ? 1 : 0}:${r.color}:${r.name}`).join('|');
+    const visible = visibleColumnNames(document);
+    const api = hasApiKeyPresent();
+    const cols = [...visible].sort().join(',');
+    const sig = `${cols}|${api ? 1 : 0}|${filters.map((r) => `${r.id}:${r.enabled ? 1 : 0}:${r.color}:${r.name}`).join('|')}`;
     if (sig === chipSig && wrap.childElementCount === filters.length) return;
     chipSig = sig;
-    wrap.innerHTML = filters.map((rule) =>
-      `<button type="button" class="chip filter-chip${rule.enabled ? ' on' : ''}" data-filter="${escapeHtml(rule.id)}"><span class="sw" style="background:${escapeHtml(rule.color)}"></span>${escapeHtml(rule.name)}</button>`,
-    ).join('');
+    const warnings = filters
+      .filter((r) => r.enabled)
+      .map((r) => missingColumnsMessage(missingColumnsForRule(r, visible, api)))
+      .filter(Boolean);
+    if (warnEl) {
+      warnEl.hidden = !warnings.length;
+      warnEl.textContent = warnings[0] || '';
+    }
+    wrap.innerHTML = filters.map((rule) => {
+      const warn = missingColumnsMessage(missingColumnsForRule({ ...rule, enabled: true }, visible, api));
+      const missingOn = rule.enabled && warn;
+      return `<button type="button" class="chip filter-chip${rule.enabled ? ' on' : ''}${missingOn ? ' warn' : ''}" data-filter="${escapeHtml(rule.id)}" ${warn ? `title="${escapeHtml(warn)}"` : ''}><span class="sw" style="background:${escapeHtml(rule.color)}"></span>${escapeHtml(rule.name)}</button>`;
+    }).join('');
     wrap.querySelectorAll('button[data-filter]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = (btn as HTMLElement).dataset.filter || '';
+        const cur = (page().filters || []).find((r) => r.id === id);
+        const enabling = !cur?.enabled;
         const next = (page().filters || []).map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r));
+        if (enabling && cur && warnEl) {
+          const msg = missingColumnsMessage(missingColumnsForRule({ ...cur, enabled: true }, visibleColumnNames(document), hasApiKeyPresent()));
+          warnEl.hidden = !msg;
+          warnEl.textContent = msg;
+        }
         applyFilters(next);
       });
     });

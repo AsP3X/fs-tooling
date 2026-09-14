@@ -2,11 +2,12 @@
 // Agent: READS collectRows for status/initiator hints. CALLS onPatch with a criteria slice. Does not persist.
 
 import { formatStart, parseStartInput } from '../lib/dates';
-import { asFiniteNumber, asNumberList, asStringList, criterionActive } from '../lib/filters';
+import { asFiniteNumber, asNumberList, asStringList, builtinStatusPattern, criterionActive } from '../lib/filters';
+import { compileUnicodeRegex } from '../lib/patterns';
 import { collectRows } from '../lib/rows';
 import { PRIORITIES } from '../lib/ticket-fields';
 import { escapeHtml } from '../lib/text';
-import type { FilterCriteria, ModuleId } from '../lib/types';
+import type { FilterCriteria, FilterRule, ModuleId } from '../lib/types';
 
 export function groupSummary(ids: string[], criteria: FilterCriteria): string {
   const bits: string[] = [];
@@ -48,6 +49,8 @@ function summaryFor(id: string, c: FilterCriteria): string {
   }
   if (id === 'maxProgress') return boundLabel('Prog', c.minProgress, c.maxProgress, '%');
   if (id === 'subjectIncludes') return asStringList(c.subjectIncludes).slice(0, 2).join(', ');
+  if (id === 'statusPattern') return String(c.statusPattern || '').trim() ? 'Regex' : '';
+  if (id === 'subjectPattern') return String(c.subjectPattern || '').trim() ? 'Regex' : '';
   return '';
 }
 
@@ -66,6 +69,7 @@ export function mountCriterion(
   criteria: FilterCriteria,
   moduleId: ModuleId,
   onPatch: (patch: FilterCriteria) => void,
+  rule?: FilterRule,
 ): void {
   if (id === 'idleDays') {
     mountBound(host, 'Idle age', 'idleDays', 'idleDaysMax', criteria.idleDays, criteria.idleDaysMax, 6, 14, 'd', onPatch);
@@ -187,6 +191,28 @@ export function mountCriterion(
   }
   if (id === 'subjectIncludes') {
     mountTags(host, 'Subject contains', 'Phrase · Enter', asStringList(criteria.subjectIncludes), [], (next) => onPatch({ subjectIncludes: next }));
+    return;
+  }
+  if (id === 'statusPattern') {
+    mountRegex(
+      host,
+      'Status regex',
+      'Unicode, case-insensitive. Matches the status cell in any UI language.',
+      String(criteria.statusPattern || ''),
+      rule ? builtinStatusPattern(rule) : null,
+      (next) => onPatch({ statusPattern: next }),
+    );
+    return;
+  }
+  if (id === 'subjectPattern') {
+    mountRegex(
+      host,
+      'Subject regex',
+      'Unicode, case-insensitive. Matches subject or label.',
+      String(criteria.subjectPattern || ''),
+      null,
+      (next) => onPatch({ subjectPattern: next }),
+    );
     return;
   }
   host.innerHTML = `<p class="hint">${escapeHtml(id)} is registered but has no editor yet.</p>`;
@@ -326,6 +352,34 @@ function mountChoiceChips(
       onChange(next);
     });
     chips.appendChild(btn);
+  });
+}
+
+// Human: Customizable Unicode regex field. Empty turns the dimension off; invalid source is ignored at match time.
+// Agent: CALLS compileUnicodeRegex. WRITES criteria via onChange (null when cleared). Default chip restores builtinStatusPattern.
+function mountRegex(
+  host: HTMLElement,
+  label: string,
+  hint: string,
+  value: string,
+  defaultPattern: string | null,
+  onChange: (next: string | null) => void,
+): void {
+  const invalid = !!value.trim() && !compileUnicodeRegex(value);
+  const canReset = !!defaultPattern && value.trim() !== defaultPattern;
+  host.innerHTML = `
+    <span class="label">${escapeHtml(label)}</span>
+    <textarea class="regex" spellcheck="false" rows="3" placeholder="Unicode regex · iu">${escapeHtml(value)}</textarea>
+    <p class="hint${invalid ? ' err' : ''}">${invalid ? 'Invalid regex — this dimension is ignored until it compiles.' : escapeHtml(hint)}</p>
+    ${canReset ? '<button type="button" class="chip" data-default="1">Default regex</button>' : ''}`;
+  const area = host.querySelector('textarea');
+  area?.addEventListener('keydown', (e) => e.stopPropagation());
+  area?.addEventListener('change', () => {
+    const next = (area.value || '').trim();
+    onChange(next || null);
+  });
+  host.querySelector('[data-default]')?.addEventListener('click', () => {
+    if (defaultPattern) onChange(defaultPattern);
   });
 }
 

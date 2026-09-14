@@ -47,7 +47,7 @@ export function prettyStart(d: Date | null): string | null {
 export function parseTicketDate(raw: string | null | undefined): Date | null {
   if (!raw) return null;
   const str = String(raw).replace(/\s+/g, ' ').trim();
-  let m = str.match(/(\d{1,2})\s+([A-Za-z]{3})\.?,?\s+(\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
+  let m = str.match(/(\d{1,2})\s+(\p{L}{3})\.?,?\s+(\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/u);
   if (m && MONTHS[m[2].toLowerCase()] != null) {
     return new Date(+m[3], MONTHS[m[2].toLowerCase()], +m[1], +(m[4] || 0), +(m[5] || 0));
   }
@@ -81,7 +81,7 @@ export function parseStartInput(raw: string | null | undefined): string | null {
   }
   m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) return dateKey(civilDate(+m[1], +m[2], +m[3]));
-  m = str.match(/^(\d{1,2})\s+([A-Za-z]{3})\.?\s+(\d{4})$/);
+  m = str.match(/^(\d{1,2})\s+(\p{L}{3})\.?\s+(\d{4})$/u);
   if (m && MONTHS[m[2].toLowerCase()] != null) {
     return dateKey(civilDate(+m[3], MONTHS[m[2].toLowerCase()] + 1, +m[1]));
   }
