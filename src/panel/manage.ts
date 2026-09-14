@@ -2,11 +2,11 @@
 // Agent: READS page().filters. CALLS onChange with a new filters array. CALLS onLayout after editor size changes.
 
 import { missingColumnsForRule, missingColumnsMessage, visibleColumnNames } from '../lib/columns';
-import { blankFilter, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, restoreFromSource } from '../lib/filters';
+import { blankFilter, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, prefilledStatusPattern, restoreFromSource } from '../lib/filters';
 import { getModuleId, hasApiKeyPresent, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
 import type { FilterRule, MatchMode } from '../lib/types';
-import { groupSummary, mountCriterion } from './criteria';
+import { groupSummary, mountCriterion, mountStatusRegex } from './criteria';
 
 const SWATCHES = ['#e65100', '#c62828', '#6a1b9a', '#1565c0', '#2e7d32'];
 
@@ -40,7 +40,10 @@ export function initManage(
         openGroups.clear();
         CRITERION_GROUPS.forEach((g) => {
           const ids = fields.filter((f) => f.group === g.id).map((f) => f.id);
-          if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age' || g.id === 'priority') openGroups.add(g.id);
+          const hasRegex = g.id === 'status' && !!prefilledStatusPattern(rule);
+          if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age' || g.id === 'priority' || hasRegex) {
+            openGroups.add(g.id);
+          }
         });
       }
       seededId = rule.id;
@@ -48,7 +51,7 @@ export function initManage(
     editor.classList.remove('hide');
     editor.innerHTML = `
       <span class="label">${rule.builtin ? 'Default filter' : 'Edit filter'}</span>
-      <p class="hint">${rule.builtin ? 'Saving creates a custom copy. The original default stays restorable.' : forked ? 'Custom copy of a default. Restore resets its rules.' : 'Saved on each change.'}</p>
+      <p class="hint">${rule.builtin ? 'Saving creates a custom copy. The original default stays restorable.' : forked ? 'Custom copy of a default. Restore resets its rules.' : 'Saved on each change.'} Up/down on the list is importance — first enabled match paints the row. All/Any applies inside this filter.</p>
       <label class="range-field"><span>Name</span>
         <input id="filterName" type="text" maxlength="40" value="${escapeHtml(rule.name)}" />
       </label>
@@ -64,6 +67,7 @@ export function initManage(
         ${SWATCHES.map((c) => `<button type="button" class="swatch${c.toLowerCase() === rule.color.toLowerCase() ? ' on' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
         <input type="color" id="filterColor" value="${escapeHtml(rule.color)}" style="width:26px;height:26px;border:0;padding:0;background:none;cursor:pointer" />
       </div>
+      <div class="editor-field" id="filterRegex"></div>
       <div id="filterFields"></div>
       <div class="chips">
         <button class="ghost" id="closeEditor" type="button" style="flex:1">Done</button>
@@ -71,14 +75,20 @@ export function initManage(
         ${rule.builtin ? '' : '<button class="ghost" id="delEditor" type="button" style="flex:1">Delete</button>'}
       </div>`;
 
+    const regexHost = editor.querySelector('#filterRegex') as HTMLElement | null;
+    if (regexHost) {
+      mountStatusRegex(regexHost, rule, (patch) => {
+        patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
+      });
+    }
     const fieldsHost = editor.querySelector('#filterFields') as HTMLElement;
     CRITERION_GROUPS.forEach((group) => {
-      const specs = fields.filter((f) => f.group === group.id);
+      const specs = fields.filter((f) => f.group === group.id && f.id !== 'statusPattern');
       if (!specs.length) return;
       const box = document.createElement('div');
       const open = openGroups.has(group.id);
       box.className = `tagbox editor-group${open ? ' open' : ''}`;
-      const summary = groupSummary(specs.map((s) => s.id), rule.criteria);
+      const summary = groupSummary(fields.filter((f) => f.group === group.id).map((s) => s.id), rule.criteria);
       box.innerHTML = `
         <button type="button" class="tagbox-head" data-group="${group.id}">
           <span class="label">${escapeHtml(group.label)}</span>

@@ -81,7 +81,7 @@ Ticket defaults that match a **status** (Open, Pending, 3rd party) use a **Unico
 
 List columns are keyed by `data-name`, so Freshservice **column reorder** does not break scraping. Hidden columns that a filter needs (Priority, Due date, Agent, Updated, …) produce a warning when that filter is turned on, unless an API key can fill the same fields.
 
-Enabled filters run **in list order**. The first match paints the row in that filter’s color. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
+Enabled filters run **in list order** (importance). The first match paints the row in that filter’s color. Defaults that identify a status ship with a **prefilled Unicode regex** in Manage; editing it forks a restorable copy. Ticket defaults put Urgent / Escalated / Overdue above the Idle catch-all so a more specific enabled rule wins. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
 
 ## Ticket ops (statistics)
 

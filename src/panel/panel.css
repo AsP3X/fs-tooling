@@ -153,6 +153,7 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
 #filterEditor .editor-group > .hint { margin-top: 4px; }
 #filterEditor .editor-group .tagbox-body { gap: 8px; }
 #filterEditor .editor-field { display: grid; gap: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.06); }
+#filterEditor #filterRegex { border-top: 0; padding-top: 8px; margin-bottom: 4px; }
 #filterEditor .editor-field:first-child { border-top: 0; padding-top: 0; }
 #filterEditor .editor-bound { display: grid; gap: 4px; }
 #filterInvert { width: 100%; justify-content: center; }

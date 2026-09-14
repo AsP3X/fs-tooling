@@ -17,7 +17,7 @@
     <button class="icon-btn" id="closeFilters" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </header>
   <div class="body">
-    <p class="hint">Up/down is apply order. Status defaults use a Unicode regex (German, English, and other locales). Saving a default creates a restorable copy.</p>
+    <p class="hint">Up/down is importance — first enabled match paints the row. Defaults that match a status ship with a prefilled Unicode regex you can edit. Saving a default creates a restorable copy.</p>
     <p class="hint warn" id="manageFilterWarn" hidden></p>
     <div id="filterList"></div>
     <button class="ghost" id="newFilter" type="button">New filter</button>
@@ -54,7 +54,7 @@
     <div class="row-between" data-feature="list-chrome"><span class="label">Highlight</span><button class="toggle" id="enabled"><i></i></button></div>
     <div class="card" data-feature="list-filters">
       <span class="label">Filters</span>
-      <p class="hint">Turn chips on to paint rows. Order is priority — first match wins the color.</p>
+      <p class="hint">Turn chips on to paint rows. List order is importance — first enabled match wins the color.</p>
       <p class="hint warn" id="filterWarn" hidden></p>
       <div class="chips" id="filterChips"></div>
       <button class="ghost" id="openManage" type="button">Manage filters</button>

@@ -139,6 +139,13 @@ registerCriterion({
 });
 
 registerCriterion({
+  id: 'statusPattern',
+  modules: ['tickets', 'journeys'],
+  group: 'status',
+  evaluate: (item, c) => patternMatches(c.statusPattern, item.status),
+});
+
+registerCriterion({
   id: 'statuses',
   modules: ['tickets', 'journeys'],
   group: 'status',
@@ -268,13 +275,6 @@ registerCriterion({
 });
 
 registerCriterion({
-  id: 'statusPattern',
-  modules: ['tickets', 'journeys'],
-  group: 'status',
-  evaluate: (item, c) => patternMatches(c.statusPattern, item.status),
-});
-
-registerCriterion({
   id: 'subjectPattern',
   modules: ['tickets', 'journeys'],
   group: 'text',
@@ -308,20 +308,12 @@ registerFilterPage({
   defaultColor: '#e65100',
   builtins: () => [
     makeRule({
-      id: 'idle-6', name: 'Idle 6d', builtin: true, enabled: true, color: '#e65100', matchMode: 'or',
-      criteria: { idleDays: 6 },
+      id: 'urgent', name: 'Urgent', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { priorities: [4] },
     }),
     makeRule({
-      id: 'open-idle', name: 'Open', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { statusPattern: DEFAULT_PATTERNS.statusOpen },
-    }),
-    makeRule({
-      id: 'pending-3', name: 'Pending 3d', builtin: true, color: '#6a1b9a', matchMode: 'and',
-      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusPending },
-    }),
-    makeRule({
-      id: 'w3p', name: '3rd party', builtin: true, color: '#1565c0', matchMode: 'and',
-      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusThirdParty },
+      id: 'escalated', name: 'Escalated', builtin: true, color: '#e65100', matchMode: 'or',
+      criteria: { escalated: true },
     }),
     makeRule({
       id: 'overdue', name: 'Overdue', builtin: true, color: '#c62828', matchMode: 'or',
@@ -336,12 +328,20 @@ registerFilterPage({
       criteria: { priorities: [3] },
     }),
     makeRule({
-      id: 'urgent', name: 'Urgent', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { priorities: [4] },
+      id: 'open-idle', name: 'Open', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { statusPattern: DEFAULT_PATTERNS.statusOpen },
     }),
     makeRule({
-      id: 'escalated', name: 'Escalated', builtin: true, color: '#e65100', matchMode: 'or',
-      criteria: { escalated: true },
+      id: 'w3p', name: '3rd party', builtin: true, color: '#1565c0', matchMode: 'and',
+      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusThirdParty },
+    }),
+    makeRule({
+      id: 'pending-3', name: 'Pending 3d', builtin: true, color: '#6a1b9a', matchMode: 'and',
+      criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusPending },
+    }),
+    makeRule({
+      id: 'idle-6', name: 'Idle 6d', builtin: true, enabled: true, color: '#e65100', matchMode: 'or',
+      criteria: { idleDays: 6 },
     }),
   ],
 });
@@ -352,8 +352,20 @@ registerFilterPage({
   defaultColor: '#1565c0',
   builtins: () => [
     makeRule({
-      id: 'idle-7', name: 'Idle 7d', builtin: true, enabled: true, color: '#1565c0', matchMode: 'or',
-      criteria: { idleDays: 7 },
+      id: 'started', name: 'Started', builtin: true, color: '#2e7d32', matchMode: 'or',
+      criteria: { startPassed: true },
+    }),
+    makeRule({
+      id: 'start-soon', name: 'Start ≤7d', builtin: true, color: '#2e7d32', matchMode: 'or',
+      criteria: { idleDays: 1, startWithin: 7 },
+    }),
+    makeRule({
+      id: 'low-prog', name: 'Low progress', builtin: true, color: '#c62828', matchMode: 'or',
+      criteria: { idleDays: 7, maxProgress: 40 },
+    }),
+    makeRule({
+      id: 'internal', name: 'Internal', builtin: true, color: '#1565c0', matchMode: 'or',
+      criteria: { kinds: ['Internal'] },
     }),
     makeRule({
       id: 'await-3', name: 'Awaiting 3d', builtin: true, color: '#e65100', matchMode: 'and',
@@ -364,20 +376,8 @@ registerFilterPage({
       criteria: { idleDays: 14, statusPattern: DEFAULT_PATTERNS.statusBeingProcessed },
     }),
     makeRule({
-      id: 'low-prog', name: 'Low progress', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { idleDays: 7, maxProgress: 40 },
-    }),
-    makeRule({
-      id: 'start-soon', name: 'Start ≤7d', builtin: true, color: '#2e7d32', matchMode: 'or',
-      criteria: { idleDays: 1, startWithin: 7 },
-    }),
-    makeRule({
-      id: 'internal', name: 'Internal', builtin: true, color: '#1565c0', matchMode: 'or',
-      criteria: { kinds: ['Internal'] },
-    }),
-    makeRule({
-      id: 'started', name: 'Started', builtin: true, color: '#2e7d32', matchMode: 'or',
-      criteria: { startPassed: true },
+      id: 'idle-7', name: 'Idle 7d', builtin: true, enabled: true, color: '#1565c0', matchMode: 'or',
+      criteria: { idleDays: 7 },
     }),
   ],
 });
@@ -402,6 +402,48 @@ const BUILTIN_STATUS_PATTERNS: Record<string, string> = {
 export function builtinStatusPattern(rule: FilterRule): string | null {
   const id = rule.builtin ? rule.id : (rule.sourceId || '');
   return BUILTIN_STATUS_PATTERNS[id] || null;
+}
+
+/** Editor value: stored pattern, else the stock regex on an untouched default. Cleared forks stay empty. */
+export function prefilledStatusPattern(rule: FilterRule): string {
+  const own = String(rule.criteria?.statusPattern || '').trim();
+  if (own) return own;
+  if (!rule.builtin) return '';
+  return builtinStatusPattern(rule) || '';
+}
+
+/** First enabled match wins — more specific / severe defaults sit above the idle catch-all. */
+export const CANONICAL_TICKET_FILTERS = [
+  'urgent', 'escalated', 'overdue', 'unassigned', 'high',
+  'open-idle', 'w3p', 'pending-3', 'idle-6',
+] as const;
+
+export const CANONICAL_JOURNEY_FILTERS = [
+  'started', 'start-soon', 'low-prog', 'internal', 'await-3', 'proc-14', 'idle-7',
+] as const;
+
+const LEGACY_TICKET_FILTERS = [
+  'idle-6', 'open-idle', 'pending-3', 'w3p', 'overdue', 'unassigned', 'high', 'urgent', 'escalated',
+] as const;
+
+const LEGACY_JOURNEY_FILTERS = [
+  'idle-7', 'await-3', 'proc-14', 'low-prog', 'start-soon', 'internal', 'started',
+] as const;
+
+function sameIdSeq(ids: string[], expected: readonly string[]): boolean {
+  return ids.length === expected.length && ids.every((id, i) => id === expected[i]);
+}
+
+/** Reorder a legacy all-default list to canonical importance. Custom order is left alone. */
+export function applyCanonicalFilterOrder(list: FilterRule[], moduleId: ModuleId): FilterRule[] {
+  if (list.some((r) => !r.builtin)) return list;
+  const canonical = moduleId === 'journeys' ? CANONICAL_JOURNEY_FILTERS : CANONICAL_TICKET_FILTERS;
+  const legacy = moduleId === 'journeys' ? LEGACY_JOURNEY_FILTERS : LEGACY_TICKET_FILTERS;
+  const ids = list.map((r) => r.id);
+  if (sameIdSeq(ids, canonical)) return list;
+  if (!sameIdSeq(ids, legacy)) return list;
+  const byId = new Map(list.map((r) => [r.id, r]));
+  return canonical.map((id) => byId.get(id)).filter((r): r is FilterRule => !!r);
 }
 
 export function ruleMatches(
@@ -564,7 +606,7 @@ export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterR
         list.push(live);
       }
     }
-    return list;
+    return applyCanonicalFilterOrder(list, moduleId);
   }
 
   const out: FilterRule[] = [];
@@ -588,7 +630,7 @@ export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterR
     if (seen.has(b.id) || forked.has(b.id)) return;
     out.push(b);
   });
-  return out;
+  return applyCanonicalFilterOrder(out, moduleId);
 }
 
 /** First save of a default creates a custom copy in the same slot. */

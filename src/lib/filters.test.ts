@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { defaultPage } from './constants';
+import { DEFAULT_PATTERNS } from './patterns';
 import {
   asColor,
   blankFilter,
+  CANONICAL_TICKET_FILTERS,
   duplicateFilter,
   firstMatchingFilter,
   forkFromBuiltin,
   mergeFilterList,
   moveFilter,
+  prefilledStatusPattern,
   restoreFromSource,
   ruleMatches,
 } from './filters';
@@ -79,6 +82,62 @@ describe('mergeFilterList builtins', () => {
     const list = mergeFilterList(defaultPage(), 'tickets');
     expect(list.some((r) => r.id === 'idle-6' && r.enabled && r.builtin)).toBe(true);
     expect(list.filter((r) => r.builtin).length).toBeGreaterThan(1);
+  });
+
+  it('orders ticket defaults by importance and prefills status regex', () => {
+    const list = mergeFilterList(defaultPage(), 'tickets');
+    expect(list.filter((r) => r.builtin).map((r) => r.id)).toEqual([...CANONICAL_TICKET_FILTERS]);
+    const open = list.find((r) => r.id === 'open-idle');
+    const pending = list.find((r) => r.id === 'pending-3');
+    const third = list.find((r) => r.id === 'w3p');
+    expect(open?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusOpen);
+    expect(pending?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusPending);
+    expect(third?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusThirdParty);
+    expect(prefilledStatusPattern(open!)).toBe(DEFAULT_PATTERNS.statusOpen);
+  });
+
+  it('lets a more specific enabled filter win over Idle', () => {
+    const list = mergeFilterList(defaultPage(), 'tickets').map((r) => ({
+      ...r,
+      enabled: r.id === 'idle-6' || r.id === 'urgent',
+    }));
+    const hit = firstMatchingFilter(
+      item({ idleDays: 10, priority: 4, status: 'Open' }),
+      defaultPage({ filters: list }),
+      'tickets',
+    );
+    expect(hit?.id).toBe('urgent');
+  });
+
+  it('migrates the legacy default order to canonical importance', () => {
+    const stored = defaultPage({
+      filters: [
+        'idle-6', 'open-idle', 'pending-3', 'w3p', 'overdue', 'unassigned', 'high', 'urgent', 'escalated',
+      ].map((id) => rule({ id, name: id, builtin: true, enabled: id === 'idle-6' })),
+    });
+    expect(mergeFilterList(stored, 'tickets').filter((r) => r.builtin).map((r) => r.id)).toEqual([...CANONICAL_TICKET_FILTERS]);
+  });
+
+  it('does not move a custom filter when migrating would shuffle the list', () => {
+    const stored = defaultPage({
+      filters: [
+        ...[
+          'idle-6', 'open-idle', 'pending-3', 'w3p', 'overdue', 'unassigned', 'high', 'urgent', 'escalated',
+        ].map((id) => rule({ id, name: id, builtin: true })),
+        rule({ id: 'mine', name: 'Mine', criteria: { idleDays: 2 } }),
+      ],
+    });
+    const list = mergeFilterList(stored, 'tickets');
+    expect(list[list.length - 1]?.id).toBe('mine');
+    expect(list[0].id).toBe('idle-6');
+  });
+
+  it('does not refill a cleared regex on a forked default', () => {
+    const open = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'open-idle');
+    if (!open) throw new Error('missing open-idle');
+    const fork = forkFromBuiltin({ ...open, criteria: { ...open.criteria, statusPattern: null } });
+    expect(prefilledStatusPattern(fork)).toBe('');
+    expect(prefilledStatusPattern(open)).toBe(DEFAULT_PATTERNS.statusOpen);
   });
 
   it('renames Open and matches status without requiring idle', () => {

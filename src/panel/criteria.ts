@@ -2,7 +2,7 @@
 // Agent: READS collectRows for status/initiator hints. CALLS onPatch with a criteria slice. Does not persist.
 
 import { formatStart, parseStartInput } from '../lib/dates';
-import { asFiniteNumber, asNumberList, asStringList, builtinStatusPattern, criterionActive } from '../lib/filters';
+import { asFiniteNumber, asNumberList, asStringList, builtinStatusPattern, criterionActive, prefilledStatusPattern } from '../lib/filters';
 import { compileUnicodeRegex } from '../lib/patterns';
 import { collectRows } from '../lib/rows';
 import { PRIORITIES } from '../lib/ticket-fields';
@@ -194,12 +194,16 @@ export function mountCriterion(
     return;
   }
   if (id === 'statusPattern') {
+    if (rule) {
+      mountStatusRegex(host, rule, onPatch);
+      return;
+    }
     mountRegex(
       host,
       'Status regex',
       'Unicode, case-insensitive. Matches the status cell in any UI language.',
       String(criteria.statusPattern || ''),
-      rule ? builtinStatusPattern(rule) : null,
+      null,
       (next) => onPatch({ statusPattern: next }),
     );
     return;
@@ -353,6 +357,23 @@ function mountChoiceChips(
     });
     chips.appendChild(btn);
   });
+}
+
+/** Always-visible status regex. Defaults are prefilled from the stock pattern and stay editable. */
+export function mountStatusRegex(
+  host: HTMLElement,
+  rule: FilterRule,
+  onPatch: (patch: FilterCriteria) => void,
+): void {
+  const fallback = builtinStatusPattern(rule);
+  mountRegex(
+    host,
+    'Status regex',
+    'Prefilled for defaults. Unicode, case-insensitive. Tweaking a default saves a restorable copy. Empty turns this dimension off.',
+    prefilledStatusPattern(rule),
+    fallback,
+    (next) => onPatch({ statusPattern: next }),
+  );
 }
 
 // Human: Customizable Unicode regex field. Empty turns the dimension off; invalid source is ignored at match time.
