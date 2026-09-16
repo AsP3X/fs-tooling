@@ -75,6 +75,36 @@ describe('buildTicketFilterQuery', () => {
     expect(swapped).toContain("updated_at:>'2026-08-21'");
   });
 
+  it('maps a priority regex onto known priority ids', () => {
+    const q = buildRuleTicketQuery(
+      {
+        id: 'x', name: 'X', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'or',
+        criteria: { priorityPattern: 'urgent|dringend' },
+      },
+      names,
+      now,
+    );
+    expect(q).toBe('priority:4');
+    const anchored = buildRuleTicketQuery(
+      {
+        id: 'y', name: 'Y', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'or',
+        criteria: { priorityPattern: '^Urgent$' },
+      },
+      names,
+      now,
+    );
+    expect(anchored).toBe('priority:4');
+    const digit = buildRuleTicketQuery(
+      {
+        id: 'z', name: 'Z', builtin: false, enabled: true, invert: false, color: '#e65100', matchMode: 'or',
+        criteria: { priorityPattern: '4' },
+      },
+      names,
+      now,
+    );
+    expect(digit).toBe('');
+  });
+
   it('maps a status regex onto known API status ids', () => {
     const q = buildRuleTicketQuery(
       {

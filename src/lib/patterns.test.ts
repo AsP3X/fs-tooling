@@ -4,6 +4,7 @@ import {
   DEFAULT_PATTERNS,
   parseStatusAgeLabel,
   patternMatches,
+  patternMatchesField,
 } from './patterns';
 
 describe('compileUnicodeRegex', () => {
@@ -52,9 +53,29 @@ describe('default status patterns', () => {
     expect(patternMatches(DEFAULT_PATTERNS.escalated, 'Eskaliert')).toBe(true);
   });
 
+  it('matches urgent, high, and overdue locale labels', () => {
+    expect(patternMatches(DEFAULT_PATTERNS.priorityUrgent, 'Urgent')).toBe(true);
+    expect(patternMatches(DEFAULT_PATTERNS.priorityUrgent, 'Dringend')).toBe(true);
+    expect(patternMatches(DEFAULT_PATTERNS.priorityUrgent, 'High')).toBe(false);
+    expect(patternMatches(DEFAULT_PATTERNS.priorityHigh, 'Hoch')).toBe(true);
+    expect(patternMatches(DEFAULT_PATTERNS.priorityHigh, 'highlight')).toBe(false);
+    expect(patternMatches(DEFAULT_PATTERNS.overdue, 'Overdue')).toBe(true);
+    expect(patternMatches(DEFAULT_PATTERNS.overdue, 'Überfällig')).toBe(true);
+    expect(patternMatches(DEFAULT_PATTERNS.overdue, '01 Sep, 2026')).toBe(false);
+  });
+
   it('treats an empty pattern as inactive', () => {
     expect(patternMatches('', 'Open')).toBeNull();
     expect(patternMatches(null, 'Open')).toBeNull();
+  });
+});
+
+describe('patternMatchesField', () => {
+  it('matches raw cell text or a structured fallback, not only the first non-empty one', () => {
+    expect(patternMatchesField(DEFAULT_PATTERNS.priorityUrgent, 'Dringend', '')).toBe(true);
+    expect(patternMatchesField(DEFAULT_PATTERNS.priorityUrgent, '4', 'Urgent urgent dringend')).toBe(true);
+    expect(patternMatchesField(DEFAULT_PATTERNS.priorityUrgent, '4', '')).toBe(false);
+    expect(patternMatchesField('', 'Urgent', 'Urgent')).toBeNull();
   });
 });
 

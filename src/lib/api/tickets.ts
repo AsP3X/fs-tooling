@@ -4,7 +4,7 @@
 import { MS_DAY } from '../constants';
 import { ageDays, dateKey, daysUntil } from '../dates';
 import { employeeKind, sanitizeTitle } from '../text';
-import { parsePriority } from '../ticket-fields';
+import { parsePriority, priorityLabel } from '../ticket-fields';
 import type { TicketSample } from '../ops';
 import { parseStatusActivities } from '../ops-timeline';
 import type { PageSettings, Reportable } from '../types';
@@ -245,6 +245,9 @@ export function ticketToReportable(
   const created = parseIso(ticket.created_at);
   const due = parseIso(ticket.due_by);
   const subject = ticket.subject || '';
+  const dueIn = daysUntil(due, now);
+  const unassigned = ticketUnassigned(ticket);
+  const escalated = ticketEscalated(ticket);
   return {
     status: statusLabel(ticket.status, maps),
     idleDays: idleFromUpdated(updated, created, now),
@@ -257,10 +260,13 @@ export function ticketToReportable(
     label: sanitizeTitle(subject) || `Ticket #${ticket.id}`,
     subject,
     createdDays: ageDays(created, now),
-    dueIn: daysUntil(due, now),
+    dueIn,
     priority: ticket.priority ?? null,
-    unassigned: ticketUnassigned(ticket),
-    escalated: ticketEscalated(ticket),
+    unassigned,
+    escalated,
     initiator: ticket.requesterName || '',
+    priorityText: ticket.priority != null ? priorityLabel(ticket.priority) : null,
+    agentText: unassigned === true ? 'Unassigned' : null,
+    escalatedText: escalated ? 'Escalated' : null,
   };
 }

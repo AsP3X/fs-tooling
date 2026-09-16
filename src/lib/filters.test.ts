@@ -88,12 +88,50 @@ describe('mergeFilterList builtins', () => {
     const list = mergeFilterList(defaultPage(), 'tickets');
     expect(list.filter((r) => r.builtin).map((r) => r.id)).toEqual([...CANONICAL_TICKET_FILTERS]);
     const open = list.find((r) => r.id === 'open-idle');
+    const idle = list.find((r) => r.id === 'idle-6');
     const pending = list.find((r) => r.id === 'pending-3');
     const third = list.find((r) => r.id === 'w3p');
     expect(open?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusOpen);
+    expect(idle?.matchMode).toBe('and');
+    expect(idle?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusOpen);
     expect(pending?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusPending);
     expect(third?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusThirdParty);
     expect(prefilledStatusPattern(open!)).toBe(DEFAULT_PATTERNS.statusOpen);
+    expect(prefilledStatusPattern(idle!)).toBe(DEFAULT_PATTERNS.statusOpen);
+    const urgent = list.find((r) => r.id === 'urgent');
+    const high = list.find((r) => r.id === 'high');
+    const unassigned = list.find((r) => r.id === 'unassigned');
+    const escalated = list.find((r) => r.id === 'escalated');
+    const overdue = list.find((r) => r.id === 'overdue');
+    expect(urgent?.criteria.priorityPattern).toBe(DEFAULT_PATTERNS.priorityUrgent);
+    expect(high?.criteria.priorityPattern).toBe(DEFAULT_PATTERNS.priorityHigh);
+    expect(unassigned?.criteria.unassignedPattern).toBe(DEFAULT_PATTERNS.unassigned);
+    expect(escalated?.criteria.escalatedPattern).toBe(DEFAULT_PATTERNS.escalated);
+    expect(overdue?.criteria.duePattern).toBe(DEFAULT_PATTERNS.overdue);
+    expect(prefilledStatusPattern(urgent!)).toBe(DEFAULT_PATTERNS.priorityUrgent);
+    expect(prefilledStatusPattern(unassigned!)).toBe(DEFAULT_PATTERNS.unassigned);
+  });
+
+  it('Idle 6d beats Open when both are enabled so stale Open is not swallowed', () => {
+    const list = mergeFilterList(defaultPage(), 'tickets').map((r) => ({
+      ...r,
+      enabled: r.id === 'idle-6' || r.id === 'open-idle',
+    }));
+    const page = defaultPage({ filters: list });
+    expect(firstMatchingFilter(item({ idleDays: 10, status: 'Open' }), page, 'tickets')?.id).toBe('idle-6');
+    expect(firstMatchingFilter(item({ idleDays: 0, status: 'Open' }), page, 'tickets')?.id).toBe('open-idle');
+  });
+
+  it('migrates the previous canonical order so Idle 6d sits above Open', () => {
+    const stored = defaultPage({
+      filters: [
+        'urgent', 'escalated', 'overdue', 'unassigned', 'high',
+        'open-idle', 'w3p', 'pending-3', 'idle-6',
+      ].map((id) => rule({ id, name: id, builtin: true, enabled: id === 'idle-6' })),
+    });
+    expect(mergeFilterList(stored, 'tickets').filter((r) => r.builtin).map((r) => r.id)).toEqual([...CANONICAL_TICKET_FILTERS]);
+    expect(mergeFilterList(stored, 'tickets').map((r) => r.id).indexOf('idle-6'))
+      .toBeLessThan(mergeFilterList(stored, 'tickets').map((r) => r.id).indexOf('open-idle'));
   });
 
   it('lets a more specific enabled filter win over Idle', () => {
@@ -138,6 +176,44 @@ describe('mergeFilterList builtins', () => {
     const fork = forkFromBuiltin({ ...open, criteria: { ...open.criteria, statusPattern: null } });
     expect(prefilledStatusPattern(fork)).toBe('');
     expect(prefilledStatusPattern(open)).toBe(DEFAULT_PATTERNS.statusOpen);
+  });
+
+  it('Urgent / High / Unassigned / Escalated / Overdue match locale cell text', () => {
+    const list = mergeFilterList(defaultPage(), 'tickets');
+    const urgent = list.find((r) => r.id === 'urgent')!;
+    const high = list.find((r) => r.id === 'high')!;
+    const unassigned = list.find((r) => r.id === 'unassigned')!;
+    const escalated = list.find((r) => r.id === 'escalated')!;
+    const overdue = list.find((r) => r.id === 'overdue')!;
+    expect(ruleMatches(item({ priorityText: 'Dringend', priority: null }), urgent, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priorityText: 'asap', priority: null }), urgent, 'tickets')).toBe(false);
+    expect(ruleMatches(item({ priority: 4 }), urgent, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priorityText: 'Hoch', priority: null }), high, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ agentText: 'Nicht zugewiesen', unassigned: false }), unassigned, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ unassigned: true }), unassigned, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ escalatedText: 'Eskaliert', escalated: false }), escalated, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ escalated: true }), escalated, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ dueText: 'Überfällig', dueIn: null }), overdue, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ dueIn: -1 }), overdue, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ dueIn: 3, dueText: '14-09-2026' }), overdue, 'tickets')).toBe(false);
+    const custom = rule({ id: 'asap', name: 'ASAP', criteria: { priorityPattern: 'asap' } });
+    expect(ruleMatches(item({ priorityText: 'ASAP', priority: null }), custom, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priority: 4, priorityText: 'Urgent' }), custom, 'tickets')).toBe(false);
+    const prioOnly = rule({ id: 'po', name: 'PO', criteria: { priorityPattern: DEFAULT_PATTERNS.priorityUrgent } });
+    expect(ruleMatches(item({ priorityText: '4', priority: 4 }), prioOnly, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ priority: 4 }), prioOnly, 'tickets')).toBe(true);
+    const dueOnly = rule({ id: 'do', name: 'DO', criteria: { duePattern: DEFAULT_PATTERNS.overdue } });
+    expect(ruleMatches(item({ dueIn: -1, dueText: null }), dueOnly, 'tickets')).toBe(false);
+    expect(ruleMatches(item({ dueText: 'Overdue', dueIn: null }), dueOnly, 'tickets')).toBe(true);
+  });
+
+  it('Idle 6d matches Open (locale regex) only when idle is at least 6d', () => {
+    const idle = mergeFilterList(defaultPage(), 'tickets').find((r) => r.id === 'idle-6');
+    if (!idle) throw new Error('missing idle-6');
+    expect(ruleMatches(item({ idleDays: 10, status: 'Open' }), idle, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ idleDays: 10, status: 'Offen' }), idle, 'tickets')).toBe(true);
+    expect(ruleMatches(item({ idleDays: 10, status: 'Pending' }), idle, 'tickets')).toBe(false);
+    expect(ruleMatches(item({ idleDays: 0, status: 'Open' }), idle, 'tickets')).toBe(false);
   });
 
   it('renames Open and matches status without requiring idle', () => {
@@ -191,6 +267,8 @@ describe('forkFromBuiltin', () => {
     expect(restored?.id).toBe('idle-6');
     expect(restored?.builtin).toBe(true);
     expect(restored?.criteria.idleDays).toBe(6);
+    expect(restored?.criteria.statusPattern).toBe(DEFAULT_PATTERNS.statusOpen);
+    expect(restored?.matchMode).toBe('and');
     expect(restored?.enabled).toBe(fork.enabled);
   });
 });

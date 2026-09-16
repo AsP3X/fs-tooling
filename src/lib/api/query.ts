@@ -3,8 +3,9 @@
 
 import { MS_DAY } from '../constants';
 import { asFiniteNumber, asNumberList, enabledFilters } from '../filters';
-import { compileUnicodeRegex } from '../patterns';
+import { compileUnicodeRegex, priorityLocaleHaystack } from '../patterns';
 import { normalizeRange, shiftDateKey } from '../range';
+import { PRIORITIES } from '../ticket-fields';
 import type { FilterRule, MatchMode, PageSettings } from '../types';
 
 function utcDateKey(ms: number): string {
@@ -49,6 +50,20 @@ function combinedStatusClause(
 ): string {
   const parts = [statusClause(statuses, nameToId), statusPatternClause(pattern, nameToId)].filter(Boolean);
   return parts.join(' OR ');
+}
+
+/** Map a priority regex onto Freshservice priority ids via English labels + locale stems. */
+// Agent: CALLS compileUnicodeRegex. Tests each label/stem separately so ^ / $ anchors still work.
+function priorityIdsFromPattern(pattern: unknown): number[] {
+  const compiled = compileUnicodeRegex(String(pattern || ''));
+  if (!compiled) return [];
+  return PRIORITIES.filter((p) => {
+    const tokens = [p.label, ...priorityLocaleHaystack(p.id).split(/\s+/).filter(Boolean)];
+    return tokens.some((token) => {
+      compiled.regex.lastIndex = 0;
+      return compiled.regex.test(token);
+    });
+  }).map((p) => p.id);
 }
 
 function combineIdleAndStatus(idle: string | null, statusPart: string, matchMode: MatchMode): string {
@@ -102,11 +117,14 @@ export function buildRuleTicketQuery(
   if (created) dims.push(created);
   const statusPart = combinedStatusClause(c.statuses, c.statusPattern, nameToId);
   if (statusPart) dims.push(statusPart);
-  const prios = asNumberList(c.priorities).filter((n) => n >= 1 && n <= 4);
+  const prios = [...new Set([
+    ...asNumberList(c.priorities).filter((n) => n >= 1 && n <= 4),
+    ...priorityIdsFromPattern(c.priorityPattern),
+  ])];
   if (prios.length) dims.push(prios.map((id) => `priority:${id}`).join(' OR '));
+  if (c.unassigned === true || compileUnicodeRegex(String(c.unassignedPattern || ''))) dims.push('agent_id:null');
   const due = asFiniteNumber(c.dueWithin);
   if (due != null) dims.push(dueClause(due, now));
-  if (c.unassigned === true) dims.push('agent_id:null');
   return combineDims(dims, rule.matchMode === 'and' ? 'and' : 'or');
 }
 

@@ -2,7 +2,7 @@
 // Agent: READS collectRows for status/initiator hints. CALLS onPatch with a criteria slice. Does not persist.
 
 import { formatStart, parseStartInput } from '../lib/dates';
-import { asFiniteNumber, asNumberList, asStringList, builtinStatusPattern, criterionActive, prefilledStatusPattern } from '../lib/filters';
+import { asFiniteNumber, asNumberList, asStringList, builtinFilterPattern, criterionActive, prefilledFilterPattern } from '../lib/filters';
 import { compileUnicodeRegex } from '../lib/patterns';
 import { collectRows } from '../lib/rows';
 import { PRIORITIES } from '../lib/ticket-fields';
@@ -50,6 +50,10 @@ function summaryFor(id: string, c: FilterCriteria): string {
   if (id === 'maxProgress') return boundLabel('Prog', c.minProgress, c.maxProgress, '%');
   if (id === 'subjectIncludes') return asStringList(c.subjectIncludes).slice(0, 2).join(', ');
   if (id === 'statusPattern') return String(c.statusPattern || '').trim() ? 'Regex' : '';
+  if (id === 'priorityPattern') return String(c.priorityPattern || '').trim() ? 'Regex' : '';
+  if (id === 'unassignedPattern') return String(c.unassignedPattern || '').trim() ? 'Regex' : '';
+  if (id === 'escalatedPattern') return String(c.escalatedPattern || '').trim() ? 'Regex' : '';
+  if (id === 'duePattern') return String(c.duePattern || '').trim() ? 'Regex' : '';
   if (id === 'subjectPattern') return String(c.subjectPattern || '').trim() ? 'Regex' : '';
   return '';
 }
@@ -69,7 +73,6 @@ export function mountCriterion(
   criteria: FilterCriteria,
   moduleId: ModuleId,
   onPatch: (patch: FilterCriteria) => void,
-  rule?: FilterRule,
 ): void {
   if (id === 'idleDays') {
     mountBound(host, 'Idle age', 'idleDays', 'idleDaysMax', criteria.idleDays, criteria.idleDaysMax, 6, 14, 'd', onPatch);
@@ -194,10 +197,6 @@ export function mountCriterion(
     return;
   }
   if (id === 'statusPattern') {
-    if (rule) {
-      mountStatusRegex(host, rule, onPatch);
-      return;
-    }
     mountRegex(
       host,
       'Status regex',
@@ -205,6 +204,50 @@ export function mountCriterion(
       String(criteria.statusPattern || ''),
       null,
       (next) => onPatch({ statusPattern: next }),
+    );
+    return;
+  }
+  if (id === 'priorityPattern') {
+    mountRegex(
+      host,
+      'Priority regex',
+      'Unicode, case-insensitive. Matches the Priority cell in any UI language.',
+      String(criteria.priorityPattern || ''),
+      null,
+      (next) => onPatch({ priorityPattern: next }),
+    );
+    return;
+  }
+  if (id === 'unassignedPattern') {
+    mountRegex(
+      host,
+      'Unassigned regex',
+      'Unicode, case-insensitive. Matches the Agent cell in any UI language.',
+      String(criteria.unassignedPattern || ''),
+      null,
+      (next) => onPatch({ unassignedPattern: next }),
+    );
+    return;
+  }
+  if (id === 'escalatedPattern') {
+    mountRegex(
+      host,
+      'Escalated regex',
+      'Unicode, case-insensitive. Matches the SLA / Escalated cell in any UI language.',
+      String(criteria.escalatedPattern || ''),
+      null,
+      (next) => onPatch({ escalatedPattern: next }),
+    );
+    return;
+  }
+  if (id === 'duePattern') {
+    mountRegex(
+      host,
+      'Overdue regex',
+      'Unicode, case-insensitive. Matches overdue labels on the Due date cell.',
+      String(criteria.duePattern || ''),
+      null,
+      (next) => onPatch({ duePattern: next }),
     );
     return;
   }
@@ -359,21 +402,31 @@ function mountChoiceChips(
   });
 }
 
-/** Always-visible status regex. Defaults are prefilled from the stock pattern and stay editable. */
+/** Always-visible identification regex. Status, priority, unassigned, escalated, or overdue depending on the default. */
+// Agent: CALLS builtinFilterPattern + prefilledFilterPattern. WRITES the matching criteria key via onPatch.
+export function mountFilterRegex(
+  host: HTMLElement,
+  rule: FilterRule,
+  onPatch: (patch: FilterCriteria) => void,
+): void {
+  const spec = builtinFilterPattern(rule);
+  const field = spec?.field || 'statusPattern';
+  mountRegex(
+    host,
+    spec?.label || 'Status regex',
+    spec?.hint || 'Unicode, case-insensitive. Matches the status cell in any UI language. Empty turns this dimension off.',
+    prefilledFilterPattern(rule),
+    spec?.source || null,
+    (next) => onPatch({ [field]: next }),
+  );
+}
+
 export function mountStatusRegex(
   host: HTMLElement,
   rule: FilterRule,
   onPatch: (patch: FilterCriteria) => void,
 ): void {
-  const fallback = builtinStatusPattern(rule);
-  mountRegex(
-    host,
-    'Status regex',
-    'Prefilled for defaults. Unicode, case-insensitive. Tweaking a default saves a restorable copy. Empty turns this dimension off.',
-    prefilledStatusPattern(rule),
-    fallback,
-    (next) => onPatch({ statusPattern: next }),
-  );
+  mountFilterRegex(host, rule, onPatch);
 }
 
 // Human: Customizable Unicode regex field. Empty turns the dimension off; invalid source is ignored at match time.

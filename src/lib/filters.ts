@@ -1,7 +1,8 @@
 // Human: Ordered, colored highlight filters. First enabled match wins. Criteria are registered so new pages/dimensions can plug in.
 // Agent: PURE. mergeFilterList READS builtins + stored rules. ruleMatches CALLS registered criterion.evaluate. Empty/unknown criteria are skipped. invert flips a hit after at least one dimension is active.
 
-import { DEFAULT_PATTERNS, patternMatches } from './patterns';
+import { DEFAULT_PATTERNS, patternMatches, patternMatchesField } from './patterns';
+import { priorityMatchFallback } from './ticket-fields';
 import type { FilterCriteria, FilterRule, Matchable, MatchMode, ModuleId, PageSettings, Preset } from './types';
 
 export type FilterModule = ModuleId | 'global';
@@ -102,9 +103,13 @@ export function criterionActive(id: string, c: FilterCriteria): boolean {
     case 'kinds': return asStringList(c.kinds).length > 0;
     case 'initiators': return asStringList(c.initiators).length > 0;
     case 'unassigned': return c.unassigned === true;
+    case 'unassignedPattern': return String(c.unassignedPattern || '').trim().length > 0;
     case 'priorities': return asNumberList(c.priorities).length > 0;
+    case 'priorityPattern': return String(c.priorityPattern || '').trim().length > 0;
     case 'dueWithin': return asFiniteNumber(c.dueWithin) != null;
+    case 'duePattern': return String(c.duePattern || '').trim().length > 0;
     case 'escalated': return c.escalated === true;
+    case 'escalatedPattern': return String(c.escalatedPattern || '').trim().length > 0;
     case 'startDates': return asStringList(c.startDates).length > 0;
     case 'startWithin': return c.startPassed === true || asFiniteNumber(c.startWithin) != null;
     case 'maxProgress': return asFiniteNumber(c.maxProgress) != null || asFiniteNumber(c.minProgress) != null;
@@ -199,6 +204,19 @@ registerCriterion({
   },
 });
 
+// Human: Identification regex for Agent / Priority / Due / Escalated cells. Empty source is off.
+// Agent: CALLS patternMatchesField. Falls back to an English label when API rows have no cell text.
+registerCriterion({
+  id: 'unassignedPattern',
+  modules: ['tickets'],
+  group: 'people',
+  evaluate: (item, c) => patternMatchesField(
+    c.unassignedPattern,
+    item.agentText,
+    item.unassigned === true ? 'Unassigned' : '',
+  ),
+});
+
 registerCriterion({
   id: 'priorities',
   modules: ['tickets'],
@@ -208,6 +226,17 @@ registerCriterion({
     if (!ids.length) return null;
     return item.priority != null && ids.includes(item.priority);
   },
+});
+
+registerCriterion({
+  id: 'priorityPattern',
+  modules: ['tickets'],
+  group: 'priority',
+  evaluate: (item, c) => patternMatchesField(
+    c.priorityPattern,
+    item.priorityText,
+    priorityMatchFallback(item.priority),
+  ),
 });
 
 registerCriterion({
@@ -224,6 +253,13 @@ registerCriterion({
 });
 
 registerCriterion({
+  id: 'duePattern',
+  modules: ['tickets'],
+  group: 'ticket',
+  evaluate: (item, c) => patternMatchesField(c.duePattern, item.dueText),
+});
+
+registerCriterion({
   id: 'escalated',
   modules: ['tickets'],
   group: 'ticket',
@@ -231,6 +267,17 @@ registerCriterion({
     if (c.escalated !== true) return null;
     return item.escalated === true;
   },
+});
+
+registerCriterion({
+  id: 'escalatedPattern',
+  modules: ['tickets'],
+  group: 'ticket',
+  evaluate: (item, c) => patternMatchesField(
+    c.escalatedPattern,
+    item.escalatedText,
+    item.escalated === true ? 'Escalated' : '',
+  ),
 });
 
 registerCriterion({
@@ -307,25 +354,33 @@ registerFilterPage({
   label: 'Tickets',
   defaultColor: '#e65100',
   builtins: () => [
+    // Human: Structured field (id/flag/date) OR locale regex so the identification pattern is editable in Manage.
+    // Agent: WRITES both the structured criterion and the matching DEFAULT_PATTERNS.* source. matchMode stays 'or'.
     makeRule({
       id: 'urgent', name: 'Urgent', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { priorities: [4] },
+      criteria: { priorities: [4], priorityPattern: DEFAULT_PATTERNS.priorityUrgent },
     }),
     makeRule({
       id: 'escalated', name: 'Escalated', builtin: true, color: '#e65100', matchMode: 'or',
-      criteria: { escalated: true },
+      criteria: { escalated: true, escalatedPattern: DEFAULT_PATTERNS.escalated },
     }),
     makeRule({
       id: 'overdue', name: 'Overdue', builtin: true, color: '#c62828', matchMode: 'or',
-      criteria: { dueWithin: 0 },
+      criteria: { dueWithin: 0, duePattern: DEFAULT_PATTERNS.overdue },
     }),
     makeRule({
       id: 'unassigned', name: 'Unassigned', builtin: true, color: '#6a1b9a', matchMode: 'or',
-      criteria: { unassigned: true },
+      criteria: { unassigned: true, unassignedPattern: DEFAULT_PATTERNS.unassigned },
     }),
     makeRule({
       id: 'high', name: 'High', builtin: true, color: '#e65100', matchMode: 'or',
-      criteria: { priorities: [3] },
+      criteria: { priorities: [3], priorityPattern: DEFAULT_PATTERNS.priorityHigh },
+    }),
+    // Human: Idle 6d is Open (locale regex) AND idle ≥6d. Sits above Open so stale Open is not swallowed.
+    // Agent: WRITES statusPattern from DEFAULT_PATTERNS.statusOpen. matchMode must stay 'and'.
+    makeRule({
+      id: 'idle-6', name: 'Idle 6d', builtin: true, enabled: true, color: '#e65100', matchMode: 'and',
+      criteria: { idleDays: 6, statusPattern: DEFAULT_PATTERNS.statusOpen },
     }),
     makeRule({
       id: 'open-idle', name: 'Open', builtin: true, color: '#c62828', matchMode: 'or',
@@ -338,10 +393,6 @@ registerFilterPage({
     makeRule({
       id: 'pending-3', name: 'Pending 3d', builtin: true, color: '#6a1b9a', matchMode: 'and',
       criteria: { idleDays: 3, statusPattern: DEFAULT_PATTERNS.statusPending },
-    }),
-    makeRule({
-      id: 'idle-6', name: 'Idle 6d', builtin: true, enabled: true, color: '#e65100', matchMode: 'or',
-      criteria: { idleDays: 6 },
     }),
   ],
 });
@@ -390,32 +441,74 @@ export function pageDefaultColor(moduleId: ModuleId): string {
   return pages.get(moduleId)?.defaultColor || '#e65100';
 }
 
-const BUILTIN_STATUS_PATTERNS: Record<string, string> = {
-  'open-idle': DEFAULT_PATTERNS.statusOpen,
-  'pending-3': DEFAULT_PATTERNS.statusPending,
-  w3p: DEFAULT_PATTERNS.statusThirdParty,
-  'await-3': DEFAULT_PATTERNS.statusAwaitingInfo,
-  'proc-14': DEFAULT_PATTERNS.statusBeingProcessed,
+export type FilterPatternField =
+  | 'statusPattern'
+  | 'priorityPattern'
+  | 'unassignedPattern'
+  | 'escalatedPattern'
+  | 'duePattern';
+
+export interface FilterPatternSpec {
+  field: FilterPatternField;
+  source: string;
+  label: string;
+  hint: string;
+  group: CriterionGroupId;
+}
+
+const PATTERN_HINT =
+  'Prefilled for defaults. Unicode, case-insensitive. Tweaking a default saves a restorable copy. Empty turns this dimension off.';
+
+const BUILTIN_FIELD_PATTERNS: Record<string, FilterPatternSpec> = {
+  'open-idle': { field: 'statusPattern', source: DEFAULT_PATTERNS.statusOpen, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  'idle-6': { field: 'statusPattern', source: DEFAULT_PATTERNS.statusOpen, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  'pending-3': { field: 'statusPattern', source: DEFAULT_PATTERNS.statusPending, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  w3p: { field: 'statusPattern', source: DEFAULT_PATTERNS.statusThirdParty, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  'await-3': { field: 'statusPattern', source: DEFAULT_PATTERNS.statusAwaitingInfo, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  'proc-14': { field: 'statusPattern', source: DEFAULT_PATTERNS.statusBeingProcessed, label: 'Status regex', hint: PATTERN_HINT, group: 'status' },
+  urgent: { field: 'priorityPattern', source: DEFAULT_PATTERNS.priorityUrgent, label: 'Priority regex', hint: PATTERN_HINT, group: 'priority' },
+  high: { field: 'priorityPattern', source: DEFAULT_PATTERNS.priorityHigh, label: 'Priority regex', hint: PATTERN_HINT, group: 'priority' },
+  unassigned: { field: 'unassignedPattern', source: DEFAULT_PATTERNS.unassigned, label: 'Unassigned regex', hint: PATTERN_HINT, group: 'people' },
+  escalated: { field: 'escalatedPattern', source: DEFAULT_PATTERNS.escalated, label: 'Escalated regex', hint: PATTERN_HINT, group: 'ticket' },
+  overdue: { field: 'duePattern', source: DEFAULT_PATTERNS.overdue, label: 'Overdue regex', hint: PATTERN_HINT, group: 'ticket' },
 };
 
-/** Default status regex for a builtin or a fork of one. Null when the rule has no stock pattern. */
-export function builtinStatusPattern(rule: FilterRule): string | null {
+/** Stock identification regex for a builtin or a fork of one. Null when the rule has no stock pattern. */
+// Agent: READS BUILTIN_FIELD_PATTERNS by builtin id or sourceId.
+export function builtinFilterPattern(rule: FilterRule): FilterPatternSpec | null {
   const id = rule.builtin ? rule.id : (rule.sourceId || '');
-  return BUILTIN_STATUS_PATTERNS[id] || null;
+  return BUILTIN_FIELD_PATTERNS[id] || null;
+}
+
+/** Which criteria key the top regex editor writes. Custom rules default to status. */
+export function primaryPatternField(rule: FilterRule): FilterPatternField {
+  return builtinFilterPattern(rule)?.field || 'statusPattern';
 }
 
 /** Editor value: stored pattern, else the stock regex on an untouched default. Cleared forks stay empty. */
-export function prefilledStatusPattern(rule: FilterRule): string {
-  const own = String(rule.criteria?.statusPattern || '').trim();
+// Agent: READS rule.criteria[field]. RETURNS '' on a cleared fork so we do not refill.
+export function prefilledFilterPattern(rule: FilterRule): string {
+  const spec = builtinFilterPattern(rule);
+  const field = spec?.field || 'statusPattern';
+  const own = String(rule.criteria?.[field] || '').trim();
   if (own) return own;
   if (!rule.builtin) return '';
-  return builtinStatusPattern(rule) || '';
+  return spec?.source || '';
 }
 
-/** First enabled match wins — more specific / severe defaults sit above the idle catch-all. */
+export function builtinStatusPattern(rule: FilterRule): string | null {
+  const spec = builtinFilterPattern(rule);
+  return spec?.source || null;
+}
+
+export function prefilledStatusPattern(rule: FilterRule): string {
+  return prefilledFilterPattern(rule);
+}
+
+/** First enabled match wins — Idle 6d (Open AND stale) sits above Open so it is not swallowed. */
 export const CANONICAL_TICKET_FILTERS = [
   'urgent', 'escalated', 'overdue', 'unassigned', 'high',
-  'open-idle', 'w3p', 'pending-3', 'idle-6',
+  'idle-6', 'open-idle', 'w3p', 'pending-3',
 ] as const;
 
 export const CANONICAL_JOURNEY_FILTERS = [
@@ -426,6 +519,12 @@ const LEGACY_TICKET_FILTERS = [
   'idle-6', 'open-idle', 'pending-3', 'w3p', 'overdue', 'unassigned', 'high', 'urgent', 'escalated',
 ] as const;
 
+/** Previous canonical: Open above Idle 6d, which swallowed stale Open once Idle required Open. */
+const PREV_CANONICAL_TICKET_FILTERS = [
+  'urgent', 'escalated', 'overdue', 'unassigned', 'high',
+  'open-idle', 'w3p', 'pending-3', 'idle-6',
+] as const;
+
 const LEGACY_JOURNEY_FILTERS = [
   'idle-7', 'await-3', 'proc-14', 'low-prog', 'start-soon', 'internal', 'started',
 ] as const;
@@ -434,14 +533,18 @@ function sameIdSeq(ids: string[], expected: readonly string[]): boolean {
   return ids.length === expected.length && ids.every((id, i) => id === expected[i]);
 }
 
-/** Reorder a legacy all-default list to canonical importance. Custom order is left alone. */
+/** Reorder a known all-default list to canonical importance. Custom order is left alone. */
+// Agent: READS LEGACY_* and PREV_CANONICAL_TICKET_FILTERS. RETURNS list unchanged when a custom rule is present.
 export function applyCanonicalFilterOrder(list: FilterRule[], moduleId: ModuleId): FilterRule[] {
   if (list.some((r) => !r.builtin)) return list;
   const canonical = moduleId === 'journeys' ? CANONICAL_JOURNEY_FILTERS : CANONICAL_TICKET_FILTERS;
   const legacy = moduleId === 'journeys' ? LEGACY_JOURNEY_FILTERS : LEGACY_TICKET_FILTERS;
   const ids = list.map((r) => r.id);
   if (sameIdSeq(ids, canonical)) return list;
-  if (!sameIdSeq(ids, legacy)) return list;
+  const prior = moduleId === 'journeys'
+    ? [legacy]
+    : [legacy, PREV_CANONICAL_TICKET_FILTERS];
+  if (!prior.some((seq) => sameIdSeq(ids, seq))) return list;
   const byId = new Map(list.map((r) => [r.id, r]));
   return canonical.map((id) => byId.get(id)).filter((r): r is FilterRule => !!r);
 }

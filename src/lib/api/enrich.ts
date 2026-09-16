@@ -7,6 +7,7 @@ import { rangeActive, rangeModeFor, selectRangeRows } from '../range';
 import { getApiKey } from '../secrets';
 import { getModuleId, page } from '../state';
 import { employeeKind } from '../text';
+import { priorityLabel } from '../ticket-fields';
 import type { PageSettings, Reportable, RowItem } from '../types';
 import { journeyHrefFor, parseRecordRef, ticketHrefFor } from './ids';
 import { fetchJourney, fetchJourneyList, fetchOnboardingChildren, journeyToReportable, progressFromChildTickets, startFromCustomFields, type ApiJourney } from './journeys';
@@ -50,6 +51,10 @@ function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now:
   const due = parseIso(ticket.due_by);
   const assigned = ticketUnassigned(ticket);
   const hasEscalationFlag = ticket.is_escalated != null || ticket.fr_escalated != null;
+  const escalated = hasEscalationFlag ? ticketEscalated(ticket) : item.escalated;
+  const priority = ticket.priority ?? item.priority;
+  const dueIn = daysUntil(due, now) ?? item.dueIn;
+  const unassigned = assigned ?? item.unassigned;
   return {
     ...item,
     updated,
@@ -61,11 +66,14 @@ function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now:
     fromApi: true,
     subject: ticket.subject || item.subject,
     createdDays: ageDays(created, now) ?? item.createdDays,
-    dueIn: daysUntil(due, now) ?? item.dueIn,
-    priority: ticket.priority ?? item.priority,
-    unassigned: assigned ?? item.unassigned,
-    escalated: hasEscalationFlag ? ticketEscalated(ticket) : item.escalated,
+    dueIn,
+    priority,
+    unassigned,
+    escalated,
     initiator: ticket.requesterName || item.initiator,
+    priorityText: item.priorityText || (priority != null ? priorityLabel(priority) : null),
+    agentText: item.agentText || (unassigned === true ? 'Unassigned' : null),
+    escalatedText: item.escalatedText || (escalated === true ? 'Escalated' : null),
   };
 }
 

@@ -39,9 +39,13 @@ export const CRITERION_COLUMNS: Record<string, string[]> = {
   excludeStatuses: ['status'],
   initiators: ['requester'],
   unassigned: ['assigned'],
+  unassignedPattern: ['assigned'],
   priorities: ['priority'],
+  priorityPattern: ['priority'],
   dueWithin: ['due'],
+  duePattern: ['due'],
   escalated: ['escalated'],
+  escalatedPattern: ['escalated'],
   subjectIncludes: ['subject'],
   subjectPattern: ['subject'],
   startDates: ['subject'],
@@ -88,9 +92,13 @@ export function activeCriterionIds(criteria: FilterCriteria): string[] {
   if (hasList(c.excludeStatuses)) ids.push('excludeStatuses');
   if (hasList(c.initiators)) ids.push('initiators');
   if (c.unassigned === true) ids.push('unassigned');
+  if (hasText(c.unassignedPattern)) ids.push('unassignedPattern');
   if (hasList(c.priorities)) ids.push('priorities');
+  if (hasText(c.priorityPattern)) ids.push('priorityPattern');
   if (hasNum(c.dueWithin)) ids.push('dueWithin');
+  if (hasText(c.duePattern)) ids.push('duePattern');
   if (c.escalated === true) ids.push('escalated');
+  if (hasText(c.escalatedPattern)) ids.push('escalatedPattern');
   if (hasList(c.subjectIncludes)) ids.push('subjectIncludes');
   if (hasText(c.subjectPattern)) ids.push('subjectPattern');
   if (hasList(c.startDates)) ids.push('startDates');

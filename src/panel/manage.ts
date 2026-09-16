@@ -2,11 +2,11 @@
 // Agent: READS page().filters. CALLS onChange with a new filters array. CALLS onLayout after editor size changes.
 
 import { missingColumnsForRule, missingColumnsMessage, visibleColumnNames } from '../lib/columns';
-import { blankFilter, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, prefilledStatusPattern, restoreFromSource } from '../lib/filters';
+import { blankFilter, builtinFilterPattern, CRITERION_GROUPS, criteriaFor, criterionActive, forkFromBuiltin, isForkOfDefault, moveFilter, primaryPatternField, prefilledFilterPattern, restoreFromSource } from '../lib/filters';
 import { getModuleId, hasApiKeyPresent, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
 import type { FilterRule, MatchMode } from '../lib/types';
-import { groupSummary, mountCriterion, mountStatusRegex } from './criteria';
+import { groupSummary, mountCriterion, mountFilterRegex } from './criteria';
 
 const SWATCHES = ['#e65100', '#c62828', '#6a1b9a', '#1565c0', '#2e7d32'];
 
@@ -40,7 +40,8 @@ export function initManage(
         openGroups.clear();
         CRITERION_GROUPS.forEach((g) => {
           const ids = fields.filter((f) => f.group === g.id).map((f) => f.id);
-          const hasRegex = g.id === 'status' && !!prefilledStatusPattern(rule);
+          const spec = builtinFilterPattern(rule);
+          const hasRegex = !!spec && spec.group === g.id && !!prefilledFilterPattern(rule);
           if (ids.some((id) => criterionActive(id, rule.criteria)) || g.id === 'age' || g.id === 'priority' || hasRegex) {
             openGroups.add(g.id);
           }
@@ -77,13 +78,13 @@ export function initManage(
 
     const regexHost = editor.querySelector('#filterRegex') as HTMLElement | null;
     if (regexHost) {
-      mountStatusRegex(regexHost, rule, (patch) => {
+      mountFilterRegex(regexHost, rule, (patch) => {
         patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
       });
     }
     const fieldsHost = editor.querySelector('#filterFields') as HTMLElement;
     CRITERION_GROUPS.forEach((group) => {
-      const specs = fields.filter((f) => f.group === group.id && f.id !== 'statusPattern');
+      const specs = fields.filter((f) => f.group === group.id && f.id !== primaryPatternField(rule));
       if (!specs.length) return;
       const box = document.createElement('div');
       const open = openGroups.has(group.id);
@@ -102,7 +103,7 @@ export function initManage(
         block.className = 'editor-field';
         mountCriterion(block, spec.id, rule.criteria, moduleId, (patch) => {
           patchRule(rule.id, { criteria: { ...rule.criteria, ...patch } });
-        }, rule);
+        });
         body.appendChild(block);
       });
       box.querySelector('.tagbox-head')?.addEventListener('click', () => {

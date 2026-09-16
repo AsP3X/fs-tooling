@@ -40,6 +40,14 @@ export interface FilterCriteria {
   statusPattern?: string | null;
   /** Unicode regex (`iu`) tested against subject and label. Empty = off. */
   subjectPattern?: string | null;
+  /** Unicode regex (`iu`) tested against the Priority cell (and API label fallback). Empty = off. */
+  priorityPattern?: string | null;
+  /** Unicode regex (`iu`) tested against the Agent cell. Empty = off. */
+  unassignedPattern?: string | null;
+  /** Unicode regex (`iu`) tested against the SLA / Escalated cell. Empty = off. */
+  escalatedPattern?: string | null;
+  /** Unicode regex (`iu`) tested against the Due date cell. Empty = off. */
+  duePattern?: string | null;
   dueWithin?: number | null;
   escalated?: boolean | null;
   priorities?: number[];
@@ -128,6 +136,14 @@ export interface RowItem {
   priority: number | null;
   unassigned: boolean | null;
   escalated: boolean | null;
+  /** Scraped Priority cell text (labels, titles). Null when the column is missing. */
+  priorityText?: string | null;
+  /** Scraped Agent cell text. Null when the column is missing. */
+  agentText?: string | null;
+  /** Scraped SLA / Escalated cell text. Null when the column is missing. */
+  escalatedText?: string | null;
+  /** Scraped Due date cell text. Null when the column is missing. */
+  dueText?: string | null;
 }
 
 export interface Matchable {
@@ -146,6 +162,10 @@ export interface Matchable {
   priority?: number | null;
   unassigned?: boolean | null;
   escalated?: boolean | null;
+  priorityText?: string | null;
+  agentText?: string | null;
+  escalatedText?: string | null;
+  dueText?: string | null;
 }
 
 export interface Sortable {
@@ -191,4 +211,8 @@ export interface Reportable {
   priority?: number | null;
   unassigned?: boolean | null;
   escalated?: boolean | null;
+  priorityText?: string | null;
+  agentText?: string | null;
+  escalatedText?: string | null;
+  dueText?: string | null;
 }

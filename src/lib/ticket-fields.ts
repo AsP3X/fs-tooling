@@ -1,7 +1,7 @@
 // Human: Ticket priority labels and DOM/API parsers for agent / unassigned.
 // Agent: PURE. Freshservice priority ids are 1 Low … 4 Urgent. Missing agent cells stay unknown (null), not unassigned.
 
-import { DEFAULT_PATTERNS, patternMatches, wholeWords } from './patterns';
+import { DEFAULT_PATTERNS, patternMatches, priorityLocaleHaystack } from './patterns';
 
 export const PRIORITIES = [
   { id: 1, label: 'Low' },
@@ -13,10 +13,10 @@ export const PRIORITIES = [
 export type PriorityId = (typeof PRIORITIES)[number]['id'];
 
 /** Unicode-aware stems. CSS `priority-N` / numeric ids stay language-independent. */
-const PRIORITY_URGENT = new RegExp(wholeWords('urgent|dringend|kritisch|critique|urgente|critica'), 'iu');
-const PRIORITY_HIGH = new RegExp(wholeWords('high|hoch|élevé|elevado|alta|alto'), 'iu');
-const PRIORITY_MEDIUM = new RegExp(wholeWords('medium|mittel|moyen|media|medio|med'), 'iu');
-const PRIORITY_LOW = new RegExp(wholeWords('low|niedrig|gering|faible|baja|basso|baixa'), 'iu');
+const PRIORITY_URGENT = new RegExp(DEFAULT_PATTERNS.priorityUrgent, 'iu');
+const PRIORITY_HIGH = new RegExp(DEFAULT_PATTERNS.priorityHigh, 'iu');
+const PRIORITY_MEDIUM = new RegExp(DEFAULT_PATTERNS.priorityMedium, 'iu');
+const PRIORITY_LOW = new RegExp(DEFAULT_PATTERNS.priorityLow, 'iu');
 const PRIORITY_CLASS = /(?:priority|prio)[\s_-]*([1-4])/iu;
 
 export function parsePriority(raw: string | number | null | undefined): number | null {
@@ -40,6 +40,15 @@ export function parsePriority(raw: string | number | null | undefined): number |
 export function priorityLabel(id: number | null | undefined): string {
   const hit = PRIORITIES.find((p) => p.id === id);
   return hit ? hit.label : '—';
+}
+
+/** English label plus locale stems so a regex like dringend still matches an API id-4 row. */
+// Agent: READS priorityLabel and priorityLocaleHaystack. RETURNS '' for unknown ids.
+export function priorityMatchFallback(id: number | null | undefined): string {
+  if (id == null) return '';
+  const label = priorityLabel(id);
+  if (label === '—') return '';
+  return `${label} ${priorityLocaleHaystack(id)}`.trim();
 }
 
 /**

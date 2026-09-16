@@ -56,8 +56,10 @@ describe('collectRows', () => {
     `;
     const [row] = collectRows(document, NOW);
     expect(row.priority).toBe(4);
+    expect(row.priorityText).toMatch(/Urgent/i);
     expect(row.unassigned).toBe(true);
     expect(row.dueIn).toBeCloseTo(-3, 0);
+    expect(row.dueText).toMatch(/Sep/i);
   });
 
   it('reads icon-only and data-value priority cells', () => {

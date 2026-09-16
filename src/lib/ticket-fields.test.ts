@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentCellUnassigned, parsePriority, priorityLabel } from './ticket-fields';
+import { agentCellUnassigned, parsePriority, priorityLabel, priorityMatchFallback } from './ticket-fields';
 
 describe('parsePriority', () => {
   it('maps Freshservice ids and labels', () => {
@@ -31,6 +31,14 @@ describe('priorityLabel', () => {
   it('returns the display name', () => {
     expect(priorityLabel(4)).toBe('Urgent');
     expect(priorityLabel(null)).toBe('—');
+  });
+});
+
+describe('priorityMatchFallback', () => {
+  it('includes English and locale stems for an id', () => {
+    expect(priorityMatchFallback(4)).toMatch(/Urgent/i);
+    expect(priorityMatchFallback(4)).toMatch(/dringend/i);
+    expect(priorityMatchFallback(null)).toBe('');
   });
 });
 

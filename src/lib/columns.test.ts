@@ -78,6 +78,15 @@ describe('missingColumnsForRule', () => {
     expect(missing.map((c) => c.id)).toEqual(['priority']);
   });
 
+  it('warns when a priority regex filter has no Priority column', () => {
+    const missing = missingColumnsForRule(
+      rule({ id: 'urgent', name: 'Urgent', criteria: { priorityPattern: 'urgent|dringend' } }),
+      visible,
+      false,
+    );
+    expect(missing.map((c) => c.id)).toEqual(['priority']);
+  });
+
   it('does not warn when the API can fill the field', () => {
     const missing = missingColumnsForRule(
       rule({ id: 'high', name: 'High', criteria: { priorities: [3] } }),

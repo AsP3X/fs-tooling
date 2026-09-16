@@ -89,6 +89,30 @@ function cellDate(cell: Element | null): Date | null {
   return parseTicketDate(titled?.getAttribute('title') || cell.getAttribute('title') || cell.textContent);
 }
 
+/** Visible labels/titles on a cell. Skips class names so CSS tokens are not identification text. */
+// Agent: READS attributes + textContent. RETURNS null when the column is missing or empty.
+function cellHaystack(cell: Element | null): string | null {
+  if (!cell) return null;
+  const bits: string[] = [
+    cell.getAttribute('data-value') || '',
+    cell.getAttribute('data-priority') || '',
+    cell.getAttribute('title') || '',
+    cell.getAttribute('aria-label') || '',
+    cell.textContent || '',
+  ];
+  cell.querySelectorAll('[title], [aria-label], [alt], [data-value], [data-priority]').forEach((el) => {
+    bits.push(
+      el.getAttribute('data-value') || '',
+      el.getAttribute('data-priority') || '',
+      el.getAttribute('title') || '',
+      el.getAttribute('aria-label') || '',
+      el.getAttribute('alt') || '',
+    );
+  });
+  const text = bits.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  return text || null;
+}
+
 /** First parseable token wins so a class like col-1 cannot override title="Urgent". */
 function firstPriority(values: Array<string | null | undefined>): number | null {
   for (let i = 0; i < values.length; i += 1) {
@@ -127,11 +151,29 @@ export function rowDueDate(row: Element): Date | null {
   return cellDate(namedCell(row, LIST_COLUMNS.due.aliases));
 }
 
+/** Scraped Priority cell labels for identification regex. Null when the column is missing. */
+export function rowPriorityText(row: Element): string | null {
+  return cellHaystack(namedCell(row, LIST_COLUMNS.priority.aliases));
+}
+
+/** Scraped Agent cell text for unassigned regex. Null when the column is missing or empty. */
+export function rowAgentText(row: Element): string | null {
+  const cell = namedCell(row, LIST_COLUMNS.assigned.aliases);
+  if (!cell) return null;
+  const name = String(cell.querySelector('a, .requester-cell-name')?.textContent || cell.textContent || '').replace(/\s+/g, ' ').trim();
+  return name || null;
+}
+
 export function rowUnassigned(row: Element): boolean | null {
   const cell = namedCell(row, LIST_COLUMNS.assigned.aliases);
   if (!cell) return null;
   const name = String(cell.querySelector('a, .requester-cell-name')?.textContent || cell.textContent || '');
   return agentCellUnassigned(name, true);
+}
+
+/** Scraped SLA / Escalated cell text for identification regex. */
+export function rowEscalatedText(row: Element): string | null {
+  return cellHaystack(namedCell(row, LIST_COLUMNS.escalated.aliases));
 }
 
 export function rowEscalated(row: Element): boolean | null {
@@ -143,6 +185,11 @@ export function rowEscalated(row: Element): boolean | null {
   if (raw === 'yes' || raw === 'true' || raw === 'ja') return true;
   if (raw === 'no' || raw === 'false' || raw === 'nein' || raw === '—' || raw === '-') return false;
   return false;
+}
+
+/** Scraped Due date cell text for overdue identification regex. */
+export function rowDueText(row: Element): string | null {
+  return cellHaystack(namedCell(row, LIST_COLUMNS.due.aliases));
 }
 
 export function rowTbody(row: Element): HTMLTableSectionElement | null {
@@ -200,6 +247,10 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       priority: rowPriority(row),
       unassigned: rowUnassigned(row),
       escalated: rowEscalated(row),
+      priorityText: rowPriorityText(row),
+      agentText: rowAgentText(row),
+      escalatedText: rowEscalatedText(row),
+      dueText: rowDueText(row),
     });
   });
   return out;

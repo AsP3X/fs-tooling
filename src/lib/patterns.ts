@@ -16,8 +16,23 @@ export function wholeWords(alternation: string): string {
 /** Flexible separators between words in a status phrase (space, punct). */
 const SEP = String.raw`[\s._-]+`;
 
+/** Locale stems for Freshservice priority ids 1–4. Shared by parsePriority and filter regex. */
+export const PRIORITY_STEMS: Record<1 | 2 | 3 | 4, string> = {
+  1: 'low|niedrig|gering|faible|baja|basso|baixa',
+  2: 'medium|mittel|moyen|media|medio|med',
+  3: 'high|hoch|élevé|elevado|alta|alto',
+  4: 'urgent|dringend|kritisch|critique|urgente|critica',
+};
+
+/** Words a priority-id mapping tests a user regex against (API query). */
+// Agent: READS PRIORITY_STEMS. RETURNS space-separated stems for regex.test haystacks.
+export function priorityLocaleHaystack(id: number): string {
+  const stems = PRIORITY_STEMS[id as 1 | 2 | 3 | 4];
+  return stems ? stems.replace(/\|/g, ' ') : '';
+}
+
 /**
- * Default patterns for ticket highlight filters.
+ * Default patterns for ticket highlight filters and field identification.
  * Stems cover German, English, and other common Freshservice locales without depending on one UI language.
  */
 export const DEFAULT_PATTERNS = {
@@ -28,6 +43,11 @@ export const DEFAULT_PATTERNS = {
   statusBeingProcessed: `(?:being${SEP}processed|in${SEP}bearbeitung|wird${SEP}bearbeitet|en${SEP}cours|en${SEP}proceso|in${SEP}elaborazione)`,
   unassigned: wholeWords(`unassigned|nicht${SEP}zugewiesen|nicht${SEP}zugeteilt|unzugeordnet|non${SEP}assign[eé]|sin${SEP}asignar|non${SEP}assegnat[oa]`),
   escalated: '(?:escalat|eskaliert|escalad)',
+  priorityLow: wholeWords(PRIORITY_STEMS[1]),
+  priorityMedium: wholeWords(PRIORITY_STEMS[2]),
+  priorityHigh: wholeWords(PRIORITY_STEMS[3]),
+  priorityUrgent: wholeWords(PRIORITY_STEMS[4]),
+  overdue: wholeWords(`overdue|überfällig|ueberfaellig|en${SEP}retard|atrasad[oa]|vencid[oa]|scadut[oa]|in${SEP}ritardo|achterstallig|förfallen|försenad`),
 } as const;
 
 export type DefaultPatternId = keyof typeof DEFAULT_PATTERNS;
@@ -65,6 +85,25 @@ export function patternMatches(source: string | null | undefined, text: string |
   if (!compiled) return false;
   compiled.regex.lastIndex = 0;
   return compiled.regex.test(String(text || ''));
+}
+
+/**
+ * Match identification regex against scraped cell text and/or a structured fallback label.
+ * Raw "4" must not hide fallback "Urgent". Empty pattern → dimension off (null).
+ * Agent: CALLS patternMatches on raw then fallback. RETURNS true if either hits.
+ */
+export function patternMatchesField(
+  source: string | null | undefined,
+  raw: string | null | undefined,
+  fallback?: string | null,
+): boolean | null {
+  const trimmed = String(source || '').trim();
+  if (!trimmed) return null;
+  const rawText = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (rawText && patternMatches(trimmed, rawText) === true) return true;
+  const fallbackText = String(fallback || '').replace(/\s+/g, ' ').trim();
+  if (fallbackText && patternMatches(trimmed, fallbackText) === true) return true;
+  return false;
 }
 
 /** Status-trigger labels like "Open since 11 days" / "Offen seit 11 Tagen". */
