@@ -23,6 +23,61 @@
   overflow: auto;
   flex: 0 0 auto;
 }
+/* Manage filters: keep the header fixed, scroll the body, and replace the OS scrollbar. */
+#filterPanel {
+  --sth-scroll-thumb: color-mix(in srgb, var(--accent, #e65100) 48%, #3a4048);
+  --sth-scroll-track: rgba(255, 255, 255, .06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+#filterPanel > .head {
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+#filterPanel > .body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #6d4a3a rgba(255, 255, 255, .06);
+  scrollbar-color: var(--sth-scroll-thumb) var(--sth-scroll-track);
+}
+#filterPanel > .body::-webkit-scrollbar,
+#filterEditor textarea.regex::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+#filterPanel > .body::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 99px;
+  margin: 4px 3px 14px;
+}
+#filterEditor textarea.regex::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, .04);
+  border-radius: 99px;
+  margin: 2px;
+}
+#filterPanel > .body::-webkit-scrollbar-thumb,
+#filterEditor textarea.regex::-webkit-scrollbar-thumb {
+  background-color: #6d4a3a;
+  background-color: var(--sth-scroll-thumb);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+#filterPanel > .body::-webkit-scrollbar-thumb:hover,
+#filterEditor textarea.regex::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent, #e65100);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+#filterPanel > .body::-webkit-scrollbar-corner,
+#filterEditor textarea.regex::-webkit-scrollbar-corner {
+  background: transparent;
+}
 .panel.hide, .hide { display: none !important; }
 .head { display: flex; align-items: center; gap: 10px; padding: 14px; cursor: grab; user-select: none; }
 .logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent, #e65100); color: #fff; flex: 0 0 auto; pointer-events: none; }
@@ -148,6 +203,9 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16p
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   outline: none;
   resize: vertical;
+  scrollbar-width: thin;
+  scrollbar-color: #6d4a3a rgba(255, 255, 255, .06);
+  scrollbar-color: var(--sth-scroll-thumb) var(--sth-scroll-track);
 }
 #filterEditor .editor-group { margin-top: 4px; padding: 4px 0 0; }
 #filterEditor .editor-group > .hint { margin-top: 4px; }
