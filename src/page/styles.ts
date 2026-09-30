@@ -1,5 +1,6 @@
 // Human: Injected page CSS for idle-row highlight and the Journeys Start date column.
-// Agent: WRITES #sth-page-style. Color comes from the active module's settings.
+// Agent: WRITES #sth-page-style. Color comes from the active module's settings. The Start header's
+// background / z-index are copied inline from the Subject header (start-column.ts), not forced here.
 
 import { CELL_MARK, ROW_MARK, STYLE_ID } from '../lib/constants';
 import { accentColor } from '../lib/filters';
@@ -13,15 +14,25 @@ export function applyPageStyles(): void {
   const el = pageStyleElement();
   if (!el) return;
   const c = accentColor(page(), getModuleId());
+  // Human: Tint is a background-image layer on the cells, so Freshservice's own background-color stays
+  // underneath: pinned (sticky) cells stay opaque, hover/selected colours still show, and the row is
+  // tinted once (not row + cell). The accent stripe rides on the first cell, which is the pinned checkbox
+  // column on tickets, so it stays visible while the table scrolls sideways.
+  // Agent: No background-color / box-shadow overrides on host cells. --sth-mark is set per row by paint.ts.
+  const tint = `color-mix(in srgb, var(--sth-mark, ${c}) 18%, transparent)`;
   const css = `
-      .${ROW_MARK} {
-        background-color: color-mix(in srgb, var(--sth-mark, ${c}) 18%, transparent) !important;
-        box-shadow: inset 4px 0 0 var(--sth-mark, ${c}) !important;
+      .${ROW_MARK} > td {
+        background-image: linear-gradient(${tint}, ${tint}) !important;
       }
-      .${ROW_MARK} > td { background-color: color-mix(in srgb, var(--sth-mark, ${c}) 18%, transparent) !important; }
+      .${ROW_MARK} > td:first-child {
+        background-image:
+          linear-gradient(to right, var(--sth-mark, ${c}) 0 4px, transparent 4px),
+          linear-gradient(${tint}, ${tint}) !important;
+      }
       .${CELL_MARK} {
-        background-color: color-mix(in srgb, var(--sth-mark, ${c}) 35%, transparent) !important;
+        background-color: color-mix(in srgb, var(--sth-mark, ${c}) 22%, transparent) !important;
         outline: 2px solid var(--sth-mark, ${c}) !important;
+        outline-offset: -2px;
         border-radius: 3px;
       }
       th[data-sth-col="start"], td[data-sth-col="start"] {
@@ -36,11 +47,9 @@ export function applyPageStyles(): void {
       th[data-sth-col="start"] {
         position: sticky;
         top: 0;
-        z-index: 3;
         cursor: pointer;
         user-select: none;
         font-weight: 650;
-        background: inherit !important;
         border-bottom: 1px solid var(--color-boundary-border-0-3, rgba(0,0,0,.08));
       }
       th[data-sth-col="start"]:hover { color: ${c}; }

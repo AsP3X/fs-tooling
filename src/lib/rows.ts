@@ -196,12 +196,18 @@ export function rowTbody(row: Element): HTMLTableSectionElement | null {
   return row.closest('tbody');
 }
 
+// Human: Which ticket/journey a row currently shows. Freshservice recycles <tr> elements across pages,
+// so marks and injected cells are tagged with this key and dropped when it changes.
+// Agent: READS the subject link href. RETURNS '' when the row has no link (placeholder rows).
+export function rowKey(row: Element): string {
+  return ticketHref(row) || '';
+}
+
 export function collectRows(doc: Document = document, now: number = Date.now()): RowItem[] {
   const out: RowItem[] = [];
   doc.querySelectorAll('tr.et-tr').forEach((row, idx) => {
     if (!(row instanceof HTMLTableRowElement)) return;
     if (row.closest('thead')) return;
-    if (!row.dataset.sthOrd) row.dataset.sthOrd = String(idx);
     const updatedEl = row.querySelector('td[data-name="updated_at_date"] [data-test-id="date-cell"]');
     const createdEl = row.querySelector(
       'td[data-name="created_at_date"] [data-test-id="date-cell"], td[data-name="created_at"] [data-test-id="date-cell"]',
@@ -237,7 +243,8 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       startKey: dateKey(start),
       updatedKey: dateKey(updated),
       initiator: initiatorName(row),
-      ord: Number(row.dataset.sthOrd || idx),
+      // Human: Rows are never moved in the DOM (sorting is visual only), so DOM order is Freshservice's order.
+      ord: idx,
       label: sanitizeTitle(title),
       recordId: parseRecordRef(href)?.id ?? null,
       fromApi: false,

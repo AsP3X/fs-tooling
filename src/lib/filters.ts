@@ -589,6 +589,26 @@ export function ruleMatches(
   return rule.invert ? !matched : matched;
 }
 
+// Human: Which criteria of a matched rule actually hold for this row, so the page can emphasise the
+// cell that explains the highlight (Priority for "Urgent", Updated for "Idle", …).
+// Agent: PURE. RETURNS criterion ids whose evaluate() is true, in registry order. Empty for inverted
+// rules (the row is painted because the rule failed, so no cell explains it) and for exclude-only rules.
+export function passingCriteria(
+  item: Matchable,
+  rule: FilterRule,
+  moduleId: ModuleId,
+  specs: CriterionDef[] = criteriaFor(moduleId),
+): string[] {
+  if (rule.invert) return [];
+  const bag = rule.criteria || {};
+  const ids: string[] = [];
+  for (let i = 0; i < specs.length; i += 1) {
+    if (specs[i].id === 'excludeStatuses') continue;
+    if (specs[i].evaluate(item, bag) === true) ids.push(specs[i].id);
+  }
+  return ids;
+}
+
 export function enabledFilters(page: PageSettings): FilterRule[] {
   return (page.filters || []).filter((f) => f && f.enabled);
 }

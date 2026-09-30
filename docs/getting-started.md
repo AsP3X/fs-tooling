@@ -28,5 +28,5 @@ Settings are stored in the **page** `localStorage`, so the extension and userscr
 - Compact floating panel (settings sections collapsed by default)
 - Tickets: idle highlighting from **Updated**, status tags, AND/OR, saved views
 - Journeys: injected **Start date** column parsed from the title (`Start 14-09-2026`); click the header to sort
-- Sort the visible list by Created On, Initiator, Request Status, or child progress
+- Sort the visible list by Created On, Initiator, Request Status, or child progress (visual only; Freshservice's row order is untouched)
 - Statistics snapshots do **not** store person names

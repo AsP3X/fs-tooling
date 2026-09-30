@@ -21,10 +21,12 @@ src/
     settings.ts         localStorage merge + normalize
     rows.ts             tr.et-tr → RowItem
     sort.ts             Visible-page comparator
+    visual-order.ts     Row offsets for the visual-only sort
+    emphasis.ts         Which cell explains a highlight (outline target)
     stats.ts            Buckets and snapshots (no names)
     detect.ts           tickets vs journeys
     api/                Freshservice v2 client, ticket/journey enrich, range list
-  page/                 Host-page mutations (highlight, start column)
+  page/                 Host-page mutations (highlight, visual sort, start column, observers)
   panel/                Shadow-DOM UI (html/css + event wiring)
     features.ts         Context-gated cards + registerPanelFeature()
 extension/
@@ -81,7 +83,9 @@ Ticket defaults that identify a **field** ship a **Unicode regex** (`iu`) the us
 
 List columns are keyed by `data-name`, so Freshservice **column reorder** does not break scraping. Hidden columns that a filter needs (Priority, Due date, Agent, Updated, …) produce a warning when that filter is turned on, unless an API key can fill the same fields.
 
-Enabled filters run **in list order** (importance). The first match paints the row in that filter’s color. Defaults that identify a field ship with a **prefilled Unicode regex** in Manage; editing it forks a restorable copy. Ticket defaults put Urgent / Escalated / Overdue / Idle 6d (Open and stale) above Open so a more specific enabled rule wins. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
+Enabled filters run **in list order** (importance). The first match paints the row in that filter’s color. The outlined cell is the one that explains the match (`passingCriteria` → `emphasisCell`): Updated for idle rules, Priority for Urgent/High, Status for status-only rules, the Start cell for start-date rules. Inverted rules and hidden columns get no outline.
+
+Row tint is a `background-image` layer on the cells, so Freshservice's own `background-color` stays underneath: pinned (sticky) columns stay opaque, and hover/selected colors still show through. The 4px accent stripe is drawn on the first cell (the pinned checkbox column), so it stays visible while the table scrolls sideways. Defaults that identify a field ship with a **prefilled Unicode regex** in Manage; editing it forks a restorable copy. Ticket defaults put Urgent / Escalated / Overdue / Idle 6d (Open and stale) above Open so a more specific enabled rule wins. The main panel only toggles chips; create/edit/reorder and Settings live in **Manage**.
 
 ## Ticket ops (statistics)
 
@@ -111,7 +115,22 @@ Journey start dates come from the subject (`Start` / `Starting` + day-first date
 
 ## List updates
 
-A `MutationObserver` on `document.body` re-runs `markTickets` (debounced 300ms) when Freshservice replaces table rows. Writes to our Start date column and the panel host are ignored so they cannot retrigger paint. Highlight classes are synced in place — they are not cleared before the async API enrich returns. Re-injecting the script disconnects the previous observer and removes the old host.
+A `MutationObserver` on `document.body` re-runs `markTickets` (debounced 300ms) when Freshservice replaces table rows. Writes to our Start date column and the panel host are ignored so they cannot retrigger paint. Highlight classes are synced in place — they are not cleared before the async API enrich returns. Re-injecting the script disconnects the previous observers, removes the old host, and uninstalls window listeners (`__sthTeardown`).
+
+Freshservice **recycles `<tr>` elements** (the same row shows another ticket after paging) and Ember can **rewrite a row's `class`/`style` attribute** (selection, keyboard marker). So:
+
+- Each mark remembers the row's ticket href (`rowKey`). Before the browser paints a mutation, marks on rows that now show another ticket are dropped and their Start cells are blanked. A paint that finishes after a row was recycled skips that row.
+- A second, attribute-only observer (`class`, `style`, `href`) re-applies marks, sort offsets, and lifted header z-indexes that Ember wiped, and queues a repaint when a row's link changes without any node being added. Both observers live in `src/page/observers.ts`.
+
+## Visible-page sort
+
+Sorting never moves Freshservice's `<tr>` nodes. Glimmer tracks list items by DOM position, so moving rows can orphan or misplace them on the next re-render. Instead each row gets `position: relative; top: …` (`applyVisualOrder`), so the DOM order — and `RowItem.ord` — always stays Freshservice's order.
+
+- Offsets are measured with `getBoundingClientRect` (sub-pixel) and re-measured with a `ResizeObserver` when row heights change. Adding or removing rows, or a row recycled for another ticket, snaps the table back to Freshservice's order at once, and the queued repaint sorts it again.
+- Skipped when ember-table occlusion is active (non-zero `occluded-content` spacers), or when the tbody is not a plain stack of visible list rows (a hidden row, or another visible child such as an expansion row).
+- If the list snaps back 4 times within 10 seconds, the sort is paused for that sort key and the panel says so. Picking another sort or Default resumes it.
+- Shifted rows are positioned, so header cells with `z-index` auto or 0 are lifted to 1 (`data-sth-z` keeps the old inline value) while their table is sorted.
+- Keyboard navigation still follows Freshservice's order. While the sort is active, a shift-click on a row checkbox (press and click events) is blocked and the panel shows a short notice, so a range selection cannot tick tickets outside what the user sees.
 
 ## Tests
 

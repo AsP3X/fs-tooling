@@ -263,6 +263,20 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     syncUI();
     void trackCurrentTicket().then(() => { if (statsOpen) stats.sync(); });
   };
+  // Human: Page-level notice (blocked shift-select, etc.). Auto-hides; a new message restarts the timer.
+  // Agent: WRITES #pageNotice text/hidden in the shadow root. CALLS applySavedPosition so the host re-clamps.
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  runtime.notify = (message: string) => {
+    const notice = $('pageNotice');
+    $('pageNoticeText').textContent = message;
+    notice.hidden = false;
+    applySavedPosition();
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      notice.hidden = true;
+      applySavedPosition();
+    }, 7000);
+  };
   runtime.revealPanel = () => {
     settingsOpen = false;
     resultsOpen = false;
@@ -372,7 +386,7 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     if (badge) badge.textContent = label;
     $('sortHint').textContent = cfg.sortKey === 'default'
       ? 'Table order from Freshservice.'
-      : `Sorted by ${label}, ${cfg.sortDir === 'desc' ? 'newest / Z first' : 'oldest / A first'}.`;
+      : `Sorted by ${label}, ${cfg.sortDir === 'desc' ? 'newest / Z first' : 'oldest / A first'}. Visual only: keyboard navigation follows Freshservice's order, and shift-select is paused while sorted.`;
   }
 
   function syncUI(): void {

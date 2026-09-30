@@ -1,5 +1,5 @@
 // Human: Decide which MutationObserver records are ours (start column, host) vs Freshservice’s list.
-// Agent: PURE. childList-only. Attribute toggles on highlight classes are not observed.
+// Agent: PURE. shouldIgnoreMutations is for the childList observer; rowHrefChanged for the attribute guard.
 
 import { HOST_ID } from '../lib/constants';
 
@@ -19,4 +19,14 @@ export function mutationIsOurs(m: MutationRecord, host: Element | null): boolean
 
 export function shouldIgnoreMutations(muts: MutationRecord[], host: Element | null): boolean {
   return muts.length > 0 && muts.every((m) => mutationIsOurs(m, host));
+}
+
+// Human: Freshservice recycles <tr> elements; a changed subject-link href means the row now shows
+// another ticket even when no nodes were added or removed.
+// Agent: PURE over records. RETURNS true for an href attribute change inside a list-body row.
+export function rowHrefChanged(muts: MutationRecord[]): boolean {
+  return muts.some((m) => m.type === 'attributes'
+    && m.attributeName === 'href'
+    && m.target instanceof Element
+    && !!m.target.closest('tbody tr.et-tr'));
 }

@@ -10,6 +10,7 @@ import {
   forkFromBuiltin,
   mergeFilterList,
   moveFilter,
+  passingCriteria,
   prefilledStatusPattern,
   restoreFromSource,
   ruleMatches,
@@ -436,5 +437,23 @@ describe('new criteria', () => {
     expect(ruleMatches(item({ priority: 4 }), r, 'tickets')).toBe(true);
     expect(ruleMatches(item({ priority: 1 }), r, 'tickets')).toBe(false);
     expect(ruleMatches(item({ priority: null }), r, 'tickets')).toBe(false);
+  });
+});
+
+describe('passingCriteria', () => {
+  it('lists only the criteria that hold, so the page can outline the right cell', () => {
+    const r = rule({ id: 'a', name: 'A', criteria: { idleDays: 6, statuses: ['Pending'] } });
+    expect(passingCriteria(item({ idleDays: 1, status: 'Pending' }), r, 'tickets')).toEqual(['statuses']);
+    expect(passingCriteria(item({ idleDays: 9, status: 'Pending' }), r, 'tickets')).toEqual(['idleDays', 'statuses']);
+  });
+
+  it('returns nothing for inverted rules (no cell explains a non-match)', () => {
+    const r = rule({ id: 'a', name: 'A', invert: true, criteria: { idleDays: 6 } });
+    expect(passingCriteria(item({ idleDays: 1 }), r, 'tickets')).toEqual([]);
+  });
+
+  it('ignores exclude-status, which is a cut rather than a reason', () => {
+    const r = rule({ id: 'a', name: 'A', criteria: { excludeStatuses: ['Closed'] } });
+    expect(passingCriteria(item({ status: 'Open' }), r, 'tickets')).toEqual([]);
   });
 });

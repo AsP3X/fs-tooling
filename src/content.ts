@@ -1,17 +1,21 @@
 // Human: Content-script entry. Mounts the shadow panel on Freshservice / Freshworks list pages.
-// Agent: WRITES #sth-host and #sth-page-style; observer ignores our start-column writes so paint cannot loop.
+// Agent: WRITES #sth-host and #sth-page-style. Page observers live in page/observers.ts (childList repaint +
+// attribute guard); our start-column writes are ignored so paint cannot loop.
 
 import { HOST_DEFAULT_INSET_PX, HOST_ID, STYLE_ID } from './lib/constants';
 import { hasExtensionRuntime } from './lib/secrets';
-import { shouldIgnoreMutations } from './page/mutations';
-import { markTickets } from './page/paint';
+import { startListObservers } from './page/observers';
+import { disposePaint, markTickets, visualSortActive } from './page/paint';
 import { runtime } from './page/runtime';
+import { installSelectionGuard } from './page/selection-guard';
 import { initPanel } from './panel/ui';
 // New context-specific cards: registerPanelFeature() from ./panel/features and import that module here.
 
 document.getElementById(HOST_ID)?.remove();
 document.getElementById(STYLE_ID)?.remove();
 window.__staleTicketObserver?.disconnect();
+window.__sthAttrObserver?.disconnect();
+window.__sthTeardown?.();
 
 const pageStyle = document.createElement('style');
 pageStyle.id = STYLE_ID;
@@ -35,13 +39,19 @@ if (hasExtensionRuntime()) {
   });
 }
 
-let timer: ReturnType<typeof setTimeout>;
-window.__staleTicketObserver = new MutationObserver((muts) => {
-  if (shouldIgnoreMutations(muts, host)) return;
-  clearTimeout(timer);
-  timer = setTimeout(() => {
-    markTickets();
-    runtime.onPageChange();
-  }, 300);
+const observers = startListObservers(document.body, host, () => {
+  markTickets();
+  runtime.onPageChange();
 });
-window.__staleTicketObserver.observe(document.body, { childList: true, subtree: true });
+window.__staleTicketObserver = observers.childObserver;
+window.__sthAttrObserver = observers.attrObserver;
+
+// Row-height changes are handled inside paint.ts (ResizeObserver on visually sorted rows).
+const removeSelectionGuard = installSelectionGuard(window, visualSortActive, (message) => runtime.notify(message));
+// Agent: Called by the next injected instance. Stops pending repaints and the paint module's observers so
+// two instances never write marks / offsets to the same table.
+window.__sthTeardown = () => {
+  observers.stop();
+  removeSelectionGuard();
+  disposePaint();
+};
