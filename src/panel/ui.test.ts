@@ -249,11 +249,20 @@ describe('dock while a side dialog is open', () => {
 
   // Human: Boxes as the browser would lay them out: the host grows by the side dialog, and a dialog on the
   // left pushes the main panel right inside the host.
+  // Agent: The dialog is on the left whenever its flex order is not above the panel's, as in #chromeRow where
+  // the side sections come first in the DOM. That includes a dialog just unhidden with no order assigned yet.
   function fakeLayout(m: Mounted): void {
     const rect = (left: number, top: number, width: number, height: number): DOMRect => ({
       left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}),
     } as DOMRect);
-    const side = (): boolean => !m.$('filterPanel').classList.contains('hide') || !m.$('statsPanel').classList.contains('hide');
+    const sideEl = (): HTMLElement | undefined =>
+      [m.$('filterPanel'), m.$('statsPanel')].find((el) => !el.classList.contains('hide'));
+    const side = (): boolean => !!sideEl();
+    const order = (el: HTMLElement): number => Number(el.style.order) || 0;
+    const sideOnLeft = (): boolean => {
+      const el = sideEl();
+      return !!el && order(el) <= order(m.$('panel'));
+    };
     const hostLeft = (): number => parseFloat(m.host.style.left) || 0;
     const hostTop = (): number => parseFloat(m.host.style.top) || 0;
     const stub = (el: HTMLElement, fn: () => DOMRect): void => {
@@ -261,7 +270,7 @@ describe('dock while a side dialog is open', () => {
     };
     stub(m.host, () => rect(hostLeft(), hostTop(), side() ? MAIN_W + SIDE_W : MAIN_W, 400));
     stub(m.$('chromeRow'), () => rect(hostLeft(), hostTop(), side() ? MAIN_W + SIDE_W : MAIN_W, 400));
-    stub(m.$('panel'), () => rect(hostLeft() + (side() && m.$('chromeRow').dataset.side === 'left' ? SIDE_W : 0), hostTop(), MAIN_W, 400));
+    stub(m.$('panel'), () => rect(hostLeft() + (sideOnLeft() ? SIDE_W : 0), hostTop(), MAIN_W, 400));
   }
 
   // Human: Panel docked near the right edge, so Manage opens on its left: host origin ≠ panel origin.
@@ -311,6 +320,45 @@ describe('dock while a side dialog is open', () => {
     window.innerWidth = 1200;
     window.dispatchEvent(new Event('resize'));
     expect(getSettings().x).toBe(1200 - MAIN_W - 8);
+  });
+
+  // Human: Default lower-left dock, room on the right: the dialog opens there and the main panel stays put.
+  // Agent: Guards the side choice against the transient layout in which the just-unhidden dialog sits left of
+  // the panel. Opening a dialog must not write the dock either.
+  it.each(['openManage', 'openStats'])('#%s at the default dock opens on the right and leaves the panel alone', (id) => {
+    window.innerWidth = 1024;
+    window.innerHeight = 768;
+    showList('tickets');
+    const m = mount();
+    fakeLayout(m);
+    window.dispatchEvent(new Event('resize'));
+    const { x, y } = getSettings();
+    const before = m.$('panel').getBoundingClientRect().left;
+    expect(before).toBe(20);
+    mem.clear();
+    m.$(id).click();
+    expect(m.$('chromeRow').dataset.side).toBe('right');
+    expect(m.$('panel').getBoundingClientRect().left).toBe(before);
+    expect(getSettings().x).toBe(x);
+    expect(getSettings().y).toBe(y);
+    expect(mem.has(STORAGE_KEY)).toBe(false);
+  });
+
+  // Human: A dialog that last opened on the left keeps that flex order while hidden. Opening it again after
+  // the panel moved to the left edge must judge the side from the panel's place, not from the stale order.
+  // Agent: The window is narrowed to 1024 so the displaced panel (20 + 528) would leave too little room on
+  // the right and the measured rect would pick 'left' again.
+  it('reopening Manage after a move to the left edge switches to the right', async () => {
+    const m = openManageNearRightEdge();
+    m.$('closeFilters').click();
+    drag(m.$('dragHandle'), -980, 0);
+    await tick();
+    window.innerWidth = 1024;
+    window.dispatchEvent(new Event('resize'));
+    expect(m.$('panel').getBoundingClientRect().left).toBe(20);
+    m.$('openManage').click();
+    expect(m.$('chromeRow').dataset.side).toBe('right');
+    expect(m.$('panel').getBoundingClientRect().left).toBe(20);
   });
 
   it('dragging with Manage open saves the main panel’s corner, not the host’s', async () => {

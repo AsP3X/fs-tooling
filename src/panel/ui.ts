@@ -302,11 +302,17 @@ export function initPanel(host: HTMLElement, shadow: ShadowRoot): void {
     else placeDefault();
   }
 
+  // Human: Put the side dialog where there is room for it, judged from where the main panel is pinned.
+  // Agent: READS panelPin, falling back to the measured panel rect when no pin is set. WRITES flex order on the
+  // dialog and the panel, and #chromeRow data-side. Never writes x/y/fabX/fabY. The measured left is not
+  // usable while a pin exists: syncUI unhides the dialog before this runs, and with no order yet (or the order
+  // of an earlier opening) the dialog can sit left of the panel and displace it by its own width.
   function placeSidePanel(sideEl: HTMLElement): void {
-    const main = panel.getBoundingClientRect();
+    const measured = panel.getBoundingClientRect();
+    const left = panelPin ? panelPin.x : measured.left;
     const need = 488;
-    const rightSpace = window.innerWidth - main.right;
-    const leftSpace = main.left;
+    const rightSpace = window.innerWidth - (left + measured.width);
+    const leftSpace = left;
     const side = rightSpace >= need || rightSpace >= leftSpace ? 'right' : 'left';
     sideEl.style.order = side === 'left' ? '0' : '2';
     panel.style.order = '1';
