@@ -38,6 +38,30 @@ export function initAbout(shadow: ShadowRoot): { refresh: (opts?: { force?: bool
   let inflight = false;
   let queuedForce = false;
 
+  // Human: One GitHub lookup. Writes the status line and release link; never touches the button.
+  // Agent: CALLS fetchLatestRelease. Early returns are safe here because refresh() owns the button state.
+  const runCheck = async (force: boolean): Promise<void> => {
+    const check = await fetchLatestRelease({ force });
+    if (!statusEl.isConnected) return;
+    const current = check.currentVersion || installedAddonVersion();
+    versionEl.textContent = current || '—';
+    const release = check.release;
+    if (release && isUpdateAvailable(current, release.version)) {
+      statusEl.textContent = `Version ${release.version} is available.`;
+      setLink(release.htmlUrl, release.version);
+      return;
+    }
+    if (!check.ok) {
+      statusEl.textContent = 'Couldn’t reach GitHub. Try Check for updates.';
+      return;
+    }
+    statusEl.textContent = current ? `You’re on ${current} · up to date.` : 'Up to date.';
+    setLink(null, null);
+  };
+
+  // Human: Disable the button only while a check runs. Every exit (update found, GitHub unreachable,
+  // thrown request, panel removed) hands it back, so a failed check can be retried.
+  // Agent: WRITES checkBtn.disabled in finally. A forced click during a check is queued and re-run once.
   const refresh = async (opts: { force?: boolean } = {}): Promise<void> => {
     if (!statusEl.isConnected) return;
     versionEl.textContent = installedAddonVersion() || '—';
@@ -55,33 +79,17 @@ export function initAbout(shadow: ShadowRoot): { refresh: (opts?: { force?: bool
     checkBtn.disabled = true;
     if (opts.force) statusEl.textContent = 'Checking GitHub…';
     try {
-      const check = await fetchLatestRelease({ force: !!opts.force });
-      if (!statusEl.isConnected) return;
-      const current = check.currentVersion || installedAddonVersion();
-      versionEl.textContent = current || '—';
-      const release = check.release;
-      if (release && isUpdateAvailable(current, release.version)) {
-        statusEl.textContent = `Version ${release.version} is available.`;
-        setLink(release.htmlUrl, release.version);
-        return;
-      }
-      if (!check.ok) {
-        statusEl.textContent = 'Couldn’t reach GitHub. Try Check for updates.';
-        return;
-      }
-      statusEl.textContent = current ? `You’re on ${current} · up to date.` : 'Up to date.';
-      setLink(null, null);
+      await runCheck(!!opts.force);
     } catch {
       if (statusEl.isConnected) statusEl.textContent = 'Couldn’t reach GitHub. Try again.';
     } finally {
       inflight = false;
+      checkBtn.disabled = !hasExtensionRuntime();
     }
-    if (queuedForce && statusEl.isConnected && hasExtensionRuntime()) {
+    if (queuedForce) {
       queuedForce = false;
-      await refresh({ force: true });
-      return;
+      if (statusEl.isConnected && hasExtensionRuntime()) await refresh({ force: true });
     }
-    if (checkBtn.isConnected && hasExtensionRuntime()) checkBtn.disabled = false;
   };
 
   checkBtn.addEventListener('click', (event) => {

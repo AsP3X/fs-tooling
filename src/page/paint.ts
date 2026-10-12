@@ -489,12 +489,19 @@ export function markTickets(opts: { force?: boolean } = {}): void {
   void paintList(document, !!opts.force);
 }
 
+// Human: Open every marked row in a tab. With nothing marked the panel says so instead of doing nothing.
+// Agent: CALLS paintList first so the URLs are current, then runtime.notify (no dialog) when the list is empty.
+export const NOTHING_MARKED_NOTICE = 'No marked rows to open.';
+
 export function openMarked(): void {
   void (async () => {
     setModuleId(detectModule(getSettings().module));
     await paintList(document, false);
     const urls = getLastMarkedUrls();
-    if (!urls.length) return;
+    if (!urls.length) {
+      runtime.notify(NOTHING_MARKED_NOTICE);
+      return;
+    }
     if (urls.length > 8 && !confirm(`Open ${urls.length} marked items in new tabs?`)) return;
     let opened = 0;
     urls.forEach((url) => {

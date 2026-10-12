@@ -6,6 +6,8 @@ import type { FilterRule, PageSettings, RowItem } from '../lib/types';
 import {
   applyVisualOrder,
   dropShiftsOnStructureChange,
+  NOTHING_MARKED_NOTICE,
+  openMarked,
   paintList,
   recordsTouchPaintedRows,
   restorePaintedRows,
@@ -445,6 +447,39 @@ describe('paintList', () => {
     (r.querySelector('a') as HTMLAnchorElement).setAttribute('href', '/a/tickets/77');
     await pending;
     expect(r.classList.contains(ROW_MARK)).toBe(false);
+  });
+});
+
+describe('openMarked', () => {
+  it('says so in the panel when nothing is marked, without a dialog or a tab', async () => {
+    setPage({ filters: [] });
+    document.body.innerHTML = `<table><tbody>${tr('1')}</tbody></table>`;
+    const notices: string[] = [];
+    runtime.notify = (m) => notices.push(m);
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const warn = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    openMarked();
+    await vi.waitFor(() => expect(notices).toEqual([NOTHING_MARKED_NOTICE]));
+    expect(open).not.toHaveBeenCalled();
+    expect(ask).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    runtime.notify = () => {};
+    vi.restoreAllMocks();
+  });
+
+  it('opens the marked rows and stays quiet', async () => {
+    setPage({ filters: [rule({ criteria: { idleDays: 3 } })] });
+    document.body.innerHTML = `<table><tbody>${tr('1')}</tbody></table>`;
+    const notices: string[] = [];
+    runtime.notify = (m) => notices.push(m);
+    const open = vi.spyOn(window, 'open').mockReturnValue(window);
+    openMarked();
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(String(open.mock.calls[0][0])).toContain('/a/tickets/1');
+    expect(notices).toEqual([]);
+    runtime.notify = () => {};
+    vi.restoreAllMocks();
   });
 });
 

@@ -9,6 +9,26 @@ import { PRIORITIES } from '../lib/ticket-fields';
 import { escapeHtml } from '../lib/text';
 import type { FilterCriteria, FilterRule, ModuleId } from '../lib/types';
 
+// Human: Text fields save on change, and change fires on blur, before click. That save re-renders the editor,
+// so the button under the pointer is replaced and its click never arrives. Cancelling mousedown keeps the
+// field focused through the click.
+// Agent: WRITES a mousedown listener that calls preventDefault. click still fires. The field does not blur, so
+// the caller must save it (flushFieldEdit) or overwrite it.
+export function keepFieldFocus(control: Element | null | undefined): void {
+  control?.addEventListener('mousedown', (e) => e.preventDefault());
+}
+
+// Human: Save the text field being edited now, without waiting for blur.
+// Agent: READS root.activeElement. Dispatches change on a focused textarea / text input inside scope, which runs
+// that field's own save handler. Handlers skip unchanged values, so a later real blur does not save twice.
+export function flushFieldEdit(root: ShadowRoot, scope: HTMLElement): void {
+  const active = root.activeElement;
+  if (!active || !scope.contains(active)) return;
+  const typing = active instanceof HTMLTextAreaElement
+    || (active instanceof HTMLInputElement && active.type === 'text');
+  if (typing) active.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 export function groupSummary(ids: string[], criteria: FilterCriteria): string {
   const bits: string[] = [];
   ids.forEach((id) => {
@@ -431,6 +451,7 @@ export function mountStatusRegex(
 
 // Human: Customizable Unicode regex field. Empty turns the dimension off; invalid source is ignored at match time.
 // Agent: CALLS compileUnicodeRegex. WRITES criteria via onChange (null when cleared). Default chip restores builtinStatusPattern.
+// change is skipped when the trimmed value equals the last saved one, so flushFieldEdit plus the later blur save once.
 function mountRegex(
   host: HTMLElement,
   label: string,
@@ -447,13 +468,31 @@ function mountRegex(
     <p class="hint${invalid ? ' err' : ''}">${invalid ? 'Invalid regex — this dimension is ignored until it compiles.' : escapeHtml(hint)}</p>
     ${canReset ? '<button type="button" class="chip" data-default="1">Default regex</button>' : ''}`;
   const area = host.querySelector('textarea');
+  let saved = value.trim();
   area?.addEventListener('keydown', (e) => e.stopPropagation());
   area?.addEventListener('change', () => {
     const next = (area.value || '').trim();
+    if (next === saved) return;
+    saved = next;
     onChange(next || null);
   });
-  host.querySelector('[data-default]')?.addEventListener('click', () => {
-    if (defaultPattern) onChange(defaultPattern);
+  // Human: Default regex replaces whatever is typed. Hold focus so the typed text is not saved first (that save
+  // re-rendered the editor and dropped this click).
+  // Agent: With focus still in the textarea the editor may not re-render, so the field, hint, and chip are
+  // updated here as well.
+  const reset = host.querySelector('[data-default]');
+  keepFieldFocus(reset);
+  reset?.addEventListener('click', () => {
+    if (!defaultPattern) return;
+    if (area) area.value = defaultPattern;
+    saved = defaultPattern;
+    const hintEl = host.querySelector('.hint');
+    if (hintEl) {
+      hintEl.classList.remove('err');
+      hintEl.textContent = hint;
+    }
+    reset.remove();
+    onChange(defaultPattern);
   });
 }
 

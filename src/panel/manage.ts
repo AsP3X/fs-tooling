@@ -6,7 +6,7 @@ import { blankFilter, builtinFilterPattern, CRITERION_GROUPS, criteriaFor, crite
 import { getModuleId, hasApiKeyPresent, page } from '../lib/state';
 import { escapeHtml } from '../lib/text';
 import type { FilterRule, MatchMode } from '../lib/types';
-import { groupSummary, mountCriterion, mountFilterRegex } from './criteria';
+import { flushFieldEdit, groupSummary, keepFieldFocus, mountCriterion, mountFilterRegex } from './criteria';
 
 const SWATCHES = ['#e65100', '#c62828', '#6a1b9a', '#1565c0', '#2e7d32'];
 
@@ -28,6 +28,25 @@ export function initManage(
   const commit = (filters: FilterRule[]): void => {
     hooks.onChange(filters);
     requestAnimationFrame(() => hooks.onLayout?.());
+  };
+
+  // Human: Hide and empty the editor. Used by Done, by Delete, and when the edited rule is gone.
+  // Agent: WRITES editingId / seededId = null. Does not commit.
+  const closeEditor = (): void => {
+    editingId = null;
+    seededId = null;
+    editor.classList.add('hide');
+    editor.innerHTML = '';
+    editor.removeAttribute('data-editing');
+  };
+
+  // Human: Done, Delete, Restore, and group headers hold focus on mousedown (keepFieldFocus), so the name or
+  // regex being typed has not been saved by blur yet. Save it first, then act on the stored rule.
+  // Agent: CALLS flushFieldEdit (may fork a default and change editingId). RETURNS the rule being edited as
+  // stored now, or the caller's copy when it is no longer in the list.
+  const saveTyping = (fallback: FilterRule): FilterRule => {
+    flushFieldEdit(shadow, editor);
+    return (page().filters || []).find((r) => r.id === editingId) || fallback;
   };
 
   const renderEditor = (rule: FilterRule): void => {
@@ -52,7 +71,7 @@ export function initManage(
     editor.classList.remove('hide');
     editor.innerHTML = `
       <span class="label">${rule.builtin ? 'Default filter' : 'Edit filter'}</span>
-      <p class="hint">${rule.builtin ? 'Saving creates a custom copy. The original default stays restorable.' : forked ? 'Custom copy of a default. Restore resets its rules.' : 'Saved on each change.'} Up/down on the list is importance — first enabled match paints the row. All/Any applies inside this filter.</p>
+      <p class="hint">${rule.builtin ? 'Saving creates a custom copy. The original default stays restorable.' : forked ? 'Custom copy of a default. Restore resets its rules.' : 'Saved on each change.'}${rule.enabled ? '' : ' This filter is off. Turn on its switch in the list to paint rows.'} Up/down on the list is importance — first enabled match paints the row. All/Any applies inside this filter.</p>
       <label class="range-field"><span>Name</span>
         <input id="filterName" type="text" maxlength="40" value="${escapeHtml(rule.name)}" />
       </label>
@@ -106,10 +125,12 @@ export function initManage(
         });
         body.appendChild(block);
       });
-      box.querySelector('.tagbox-head')?.addEventListener('click', () => {
+      const head = box.querySelector('.tagbox-head');
+      keepFieldFocus(head);
+      head?.addEventListener('click', () => {
+        const latest = saveTyping(rule);
         if (openGroups.has(group.id)) openGroups.delete(group.id);
         else openGroups.add(group.id);
-        const latest = (page().filters || []).find((r) => r.id === rule.id) || rule;
         renderEditor(latest);
       });
       fieldsHost.appendChild(box);
@@ -117,9 +138,13 @@ export function initManage(
 
     const nameInput = editor.querySelector('#filterName') as HTMLInputElement | null;
     nameInput?.addEventListener('keydown', (e) => e.stopPropagation());
+    // Agent: Skips an unchanged name so saveTyping plus the later blur do not save (or fork a default) twice.
+    let savedName = rule.name;
     nameInput?.addEventListener('change', () => {
       const name = nameInput.value.replace(/\s+/g, ' ').trim().slice(0, 40);
-      if (name) patchRule(rule.id, { name });
+      if (!name || name === savedName) return;
+      savedName = name;
+      patchRule(rule.id, { name });
     });
     editor.querySelectorAll('#filterMatch button').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -136,29 +161,34 @@ export function initManage(
     editor.querySelector('#filterColor')?.addEventListener('change', (e) => {
       patchRule(rule.id, { color: (e.target as HTMLInputElement).value });
     });
-    editor.querySelector('#closeEditor')?.addEventListener('click', () => {
-      editingId = null;
-      seededId = null;
-      editor.classList.add('hide');
-      editor.innerHTML = '';
-      editor.removeAttribute('data-editing');
+    const doneBtn = editor.querySelector('#closeEditor');
+    const restoreBtn = editor.querySelector('#restoreEditor');
+    const delBtn = editor.querySelector('#delEditor');
+    [doneBtn, restoreBtn, delBtn].forEach(keepFieldFocus);
+    doneBtn?.addEventListener('click', () => {
+      saveTyping(rule);
+      closeEditor();
       requestAnimationFrame(() => hooks.onLayout?.());
     });
-    editor.querySelector('#restoreEditor')?.addEventListener('click', () => {
-      const restored = restoreFromSource(rule, getModuleId());
+    restoreBtn?.addEventListener('click', () => {
+      const latest = saveTyping(rule);
+      const restored = restoreFromSource(latest, getModuleId());
       if (!restored) return;
-      const next = (page().filters || []).map((r) => (r.id === rule.id ? restored : r));
+      const next = (page().filters || []).map((r) => (r.id === latest.id ? restored : r));
       editingId = restored.id;
       commit(next);
     });
-    editor.querySelector('#delEditor')?.addEventListener('click', () => {
-      if (!confirm(`Delete “${rule.name}”?`)) return;
-      editingId = null;
+    delBtn?.addEventListener('click', () => {
+      // Human: Save first, so cancelling the prompt keeps what was typed.
+      const latest = saveTyping(rule);
+      if (!confirm(`Delete “${latest.name}”?`)) return;
+      // Agent: Close here. renderList only closes the editor while editingId is still set.
+      closeEditor();
       const list = page().filters || [];
-      const i = list.findIndex((r) => r.id === rule.id);
-      const next = list.filter((r) => r.id !== rule.id);
-      if (rule.sourceId) {
-        const restored = restoreFromSource(rule, getModuleId());
+      const i = list.findIndex((r) => r.id === latest.id);
+      const next = list.filter((r) => r.id !== latest.id);
+      if (latest.sourceId) {
+        const restored = restoreFromSource(latest, getModuleId());
         if (restored && i >= 0) next.splice(i, 0, { ...restored, enabled: false });
       }
       commit(next);
@@ -239,11 +269,7 @@ export function initManage(
     if (editingId) {
       const rule = filters.find((r) => r.id === editingId);
       if (!rule) {
-        editingId = null;
-        seededId = null;
-        editor.classList.add('hide');
-        editor.innerHTML = '';
-        editor.removeAttribute('data-editing');
+        closeEditor();
       } else {
         const active = shadow.activeElement;
         const typing = !!(active && editor.contains(active) && (
@@ -258,10 +284,13 @@ export function initManage(
     }
   };
 
+  // Human: New filter opens its editor on the same click and starts switched off, so the stock rule cannot paint
+  // rows before the user has set it up.
+  // Agent: WRITES editingId before commit. commit runs sync → renderList, which opens the editor for editingId.
   newBtn?.addEventListener('click', () => {
-    const created = blankFilter(getModuleId());
-    commit([...(page().filters || []), created]);
+    const created: FilterRule = { ...blankFilter(getModuleId()), enabled: false };
     editingId = created.id;
+    commit([...(page().filters || []), created]);
   });
 
   const sync = (): void => {

@@ -35,6 +35,8 @@ function kpi(value: string, label: string): string {
   return `<div class="stat"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
 }
 
+// Human: medianHandleMs is resolvedAt minus the first time this browser opened the ticket, not ticket age.
+// Agent: READS loadOps. The handle KPI uses the detail view's "Your … to resolve" wording; "Median age at resolve" is created→resolved.
 function renderOverview(now: number): string {
   const overview = buildOpsOverview(loadOps(), now);
   const selfKnown = loadOps().selfId != null;
@@ -47,7 +49,7 @@ function renderOverview(now: number): string {
       ${kpi(String(overview.returned), 'Returned to you')}
     </div>
     <div class="kpi">
-      ${kpi(fmtMs(overview.medianHandleMs), 'Median time to resolve')}
+      ${kpi(fmtMs(overview.medianHandleMs), 'Your median time to resolve')}
       ${kpi(fmtMs(overview.medianAgeMs), 'Median age at resolve')}
       ${kpi(selfKnown ? String(overview.assignedToSelf) : '—', 'Assigned to you now')}
     </div>

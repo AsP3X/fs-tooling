@@ -11,7 +11,7 @@
     <button class="ghost" id="updateToastDismiss" type="button">Dismiss</button>
   </div>
 </aside>
-<div class="fab" id="fab"><span class="dot" id="fabCount">0</span><span class="label" id="fabLabel">Ops panel</span></div>
+<div class="fab" id="fab" role="button" tabindex="0" aria-label="Expand ops panel"><span class="dot" id="fabCount">0</span><span class="label" id="fabLabel">Ops panel</span></div>
 <div class="chrome-row" id="chromeRow">
 <section class="panel manage hide" id="filterPanel">
   <header class="head" id="filterHandle">
@@ -136,6 +136,7 @@
       <p class="hint">From Profile settings. Stored by the extension, not in page storage.</p>
       <input id="apiKeyInput" type="password" placeholder="Paste key · Save" autocomplete="off" spellcheck="false" />
       <p class="hint" id="apiKeyStatus">No key saved</p>
+      <p class="hint hide" id="apiKeyNote" role="status"></p>
     </div>
     <div class="card">
       <span class="label">Desk URL</span>
