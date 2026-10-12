@@ -64,5 +64,9 @@ describe('rowHrefChanged', () => {
     expect(rowHrefChanged([attr(link, 'href')])).toBe(true);
     expect(rowHrefChanged([attr(link, 'class')])).toBe(false);
     expect(rowHrefChanged([attr(nav, 'href')])).toBe(false);
+    const user = document.createElement('a');
+    user.setAttribute('href', '/users/9');
+    (document.querySelector('tr') as HTMLElement).appendChild(user);
+    expect(rowHrefChanged([attr(user, 'href')])).toBe(false);
   });
 });

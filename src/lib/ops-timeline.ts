@@ -22,9 +22,11 @@ export interface StatusDwell {
 export function statusFromActivity(content: string): string | null {
   const text = String(content || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
-  const match = text.match(/\bstatus\b(?:.{0,80}?)(?:\bas\b|\bto\b)\s+["']?([A-Za-z][A-Za-z0-9 /_-]{0,39})/i);
+  // Human: Stop at a comma or " and " so "Open and assigned to Jane Doe" does not store the name.
+  const match = text.match(/\bstatus\b(?:.{0,80}?)(?:\bas\b|\bto\b)\s+["']?(\p{L}[\p{L}\p{N} /_-]{0,39})/iu);
   if (!match) return null;
-  return opsStatusLabel(match[1]);
+  const token = match[1].split(/\s+and\s+|,/i)[0].trim();
+  return opsStatusLabel(token);
 }
 
 export function parseStatusActivities(json: unknown): StatusLogEvent[] {
@@ -41,8 +43,14 @@ export function parseStatusActivities(json: unknown): StatusLogEvent[] {
     const rec = item as Record<string, unknown>;
     const at = Date.parse(String(rec.created_at || rec.performed_at || rec.updated_at || ''));
     if (!Number.isFinite(at) || at <= 0) return;
-    const content = String(rec.content || rec.description || rec.sub_content || rec.action || '');
-    const status = statusFromActivity(content);
+    const bits: unknown[] = [rec.content, rec.description, rec.sub_content, rec.action];
+    if (Array.isArray(rec.sub_contents)) bits.push(...rec.sub_contents);
+    let status = '';
+    bits.forEach((bit) => {
+      if (typeof bit !== 'string') return;
+      const found = statusFromActivity(bit);
+      if (found) status = found;
+    });
     if (status) out.push({ at, status });
   });
   return out.sort((a, b) => a.at - b.at);
@@ -58,13 +66,11 @@ export function dwellFromLog(
     .sort((a, b) => a.at - b.at);
   if (!cleaned.length) return null;
   const statusMs: Record<string, number> = {};
-  let start = createdAt && createdAt > 0 && createdAt < cleaned[0].at ? createdAt : cleaned[0].at;
+  // Human: The first event is the status the ticket changed TO. Time before that belongs to an earlier status we did not see.
+  // Agent: Does not charge createdAt→first event to cleaned[0].status. createdAt is unused on purpose.
+  let start = cleaned[0].at;
   let status = cleaned[0].status;
-  if (createdAt && createdAt > 0 && createdAt < cleaned[0].at) {
-    start = createdAt;
-  } else {
-    start = cleaned[0].at;
-  }
+  void createdAt;
   cleaned.forEach((event) => {
     if (event.status.toLowerCase() === status.toLowerCase()) return;
     const dt = Math.max(0, event.at - start);

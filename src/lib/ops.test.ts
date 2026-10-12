@@ -67,6 +67,13 @@ describe('ops ledger', () => {
     expect(JSON.parse(storage.getItem(OPS_KEY) || '{}').tickets['5'].responderId).toBeUndefined();
   });
 
+  it('keeps an API resolve time when the status label is not the English word', () => {
+    const storage = mem();
+    recordVisit(8, 0, storage);
+    applySample(8, { status: 'Gelöst', resolvedAt: 50_000 }, 60_000, storage);
+    expect(loadOps(storage).tickets['8'].resolvedAt).toBe(50_000);
+  });
+
   it('drops names and emails if they appear on a status string', () => {
     const storage = mem();
     recordVisit(3, 0, storage);

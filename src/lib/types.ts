@@ -117,6 +117,8 @@ export interface RowItem {
   href: string | null;
   status: string;
   idleDays: number | null;
+  /** True when idleDays came from the status control ("since N days"), not Updated/Created. Not persisted. */
+  idleFromStatus?: boolean;
   created: Date | null;
   updated: Date | null;
   start: Date | null;

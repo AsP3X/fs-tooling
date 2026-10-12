@@ -28,6 +28,9 @@ export function isAllowedApiPath(path: string): boolean {
 
 export async function apiRequest(path: string, init: { method?: string; body?: string } = {}): Promise<ApiResponse> {
   if (!isAllowedApiPath(path)) return { ok: false, status: 0, json: null, error: 'bad_path' };
+  const method = (init.method || 'GET').toUpperCase();
+  // Human: The panel only reads Freshservice. Writes stay out of this proxy.
+  if (method !== 'GET') return { ok: false, status: 0, json: null, error: 'bad_method' };
   const origin = location.origin;
   if (hasExtensionRuntime()) {
     try {
@@ -35,8 +38,7 @@ export async function apiRequest(path: string, init: { method?: string; body?: s
         type: 'sth.api.fetch',
         origin,
         path,
-        method: init.method || 'GET',
-        body: init.body,
+        method,
       });
       return (raw || { ok: false, status: 0, json: null, error: 'no_response' }) as ApiResponse;
     } catch (err) {
@@ -47,12 +49,11 @@ export async function apiRequest(path: string, init: { method?: string; body?: s
   if (!key) return { ok: false, status: 0, json: null, error: 'no_key' };
   try {
     const res = await fetch(`${origin}${path}`, {
-      method: init.method || 'GET',
+      method,
       headers: {
         Authorization: `Basic ${btoa(`${key}:X`)}`,
         'Content-Type': 'application/json',
       },
-      body: init.body,
     });
     let json: unknown = null;
     try { json = await res.json(); } catch { json = null; }

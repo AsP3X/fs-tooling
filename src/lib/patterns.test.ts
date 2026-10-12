@@ -18,6 +18,7 @@ describe('compileUnicodeRegex', () => {
   it('returns null for empty or invalid source', () => {
     expect(compileUnicodeRegex('')).toBeNull();
     expect(compileUnicodeRegex('   ')).toBeNull();
+    expect(compileUnicodeRegex('(?:a+)+')).toBeNull();
     expect(compileUnicodeRegex('(unclosed')).toBeNull();
   });
 });

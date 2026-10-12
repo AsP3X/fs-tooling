@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { journeyToReportable, progressFromChildTickets, startFromCustomFields } from './journeys';
+import { journeyToReportable, progressFromChildTickets, shouldFallbackJourneyList, startFromCustomFields } from './journeys';
 
 describe('startFromCustomFields', () => {
   it('prefers a start/date field', () => {
@@ -9,6 +9,22 @@ describe('startFromCustomFields', () => {
 
   it('ignores user objects', () => {
     expect(startFromCustomFields({ cf_agents_dd: { id: 1, name: 'Pat' } })).toBeNull();
+  });
+
+  it('prefers a start field over an earlier end date and reads DD-MM-YYYY', () => {
+    const d = startFromCustomFields({ cf_end_date: '2020-01-01', cf_start_date: '20-08-2026' });
+    expect(d?.getFullYear()).toBe(2026);
+    expect(d?.getMonth()).toBe(7);
+    expect(d?.getDate()).toBe(20);
+  });
+});
+
+describe('shouldFallbackJourneyList', () => {
+  it('falls back only when the first page failed or was empty', () => {
+    expect(shouldFallbackJourneyList(1, false, 0)).toBe(true);
+    expect(shouldFallbackJourneyList(1, true, 0)).toBe(true);
+    expect(shouldFallbackJourneyList(1, true, 100)).toBe(false);
+    expect(shouldFallbackJourneyList(2, false, 0)).toBe(false);
   });
 });
 

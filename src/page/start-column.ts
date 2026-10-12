@@ -79,6 +79,7 @@ export function invalidateStaleStartCells(doc: Document = document): void {
     const td = el as HTMLTableCellElement;
     const row = td.closest('tr');
     if (!row || rowKey(row) === (td.dataset.sthKey || '')) return;
+    delete td.dataset.sthKey;
     delete td.dataset.startKey;
     if (!td.querySelector('.sth-empty') || td.children.length !== 1) td.innerHTML = '<span class="sth-empty">—</span>';
   });
@@ -93,7 +94,7 @@ export function injectStartColumn(items: RowItem[], doc: Document = document): v
     removeStartColumn(doc);
     return;
   }
-  const subjectTh = doc.querySelector('thead th[data-name="subject"]');
+  const subjectTh = doc.querySelector('thead th[data-name="subject"], thead th[data-name="ticket_subject"]');
   if (!subjectTh) {
     // Subject hidden or header re-rendering: a stale column would misalign every later cell.
     removeStartColumn(doc);
@@ -113,7 +114,7 @@ export function injectStartColumn(items: RowItem[], doc: Document = document): v
   const subjectIndex = headerRow ? hostCells(headerRow).indexOf(subjectTh) : -1;
   const canRange = rangeListingEnabled(hasApiKeyPresent());
   items.forEach((item) => {
-    const anchor = item.row.querySelector(':scope > td[data-name="subject"]')
+    const anchor = item.row.querySelector(':scope > td[data-name="subject"], :scope > td[data-name="ticket_subject"]')
       || (subjectIndex >= 0 ? hostCells(item.row)[subjectIndex] : null);
     if (!anchor) return;
     let td = item.row.querySelector(':scope > td[data-sth-col="start"]') as HTMLTableCellElement | null;

@@ -295,11 +295,13 @@ registerCriterion({
   id: 'startWithin',
   modules: ['journeys'],
   group: 'schedule',
+  // Human: "Started" is any start date already reached. "Nd" is the next N days, not every journey that started last year.
+  // Agent: startPassed short-circuits and clears the window. A negative startIn fails the Nd check. PURE.
   evaluate: (item, c) => {
     if (c.startPassed === true) return item.startIn != null && item.startIn <= 0;
     const within = asFiniteNumber(c.startWithin);
     if (within == null) return null;
-    return item.startIn != null && item.startIn <= within;
+    return item.startIn != null && item.startIn >= 0 && item.startIn <= within;
   },
 });
 
@@ -406,12 +408,15 @@ registerFilterPage({
       id: 'started', name: 'Started', builtin: true, color: '#2e7d32', matchMode: 'or',
       criteria: { startPassed: true },
     }),
+    // Human: "Start ≤7d" is the upcoming window only. Idle ≥1 with Any matched almost every journey.
+    // Agent: matchMode is unused while a single dimension is set. startWithin itself requires 0..N days.
     makeRule({
-      id: 'start-soon', name: 'Start ≤7d', builtin: true, color: '#2e7d32', matchMode: 'or',
-      criteria: { idleDays: 1, startWithin: 7 },
+      id: 'start-soon', name: 'Start ≤7d', builtin: true, color: '#2e7d32', matchMode: 'and',
+      criteria: { startWithin: 7 },
     }),
+    // Human: Low progress is idle ≥7 AND progress ≤40. Any made a finished 7-day journey match.
     makeRule({
-      id: 'low-prog', name: 'Low progress', builtin: true, color: '#c62828', matchMode: 'or',
+      id: 'low-prog', name: 'Low progress', builtin: true, color: '#c62828', matchMode: 'and',
       criteria: { idleDays: 7, maxProgress: 40 },
     }),
     makeRule({
@@ -727,6 +732,13 @@ export function mergeFilterList(page: PageSettings, moduleId: ModuleId): FilterR
       if (idle && !criteriaEqual(live.criteria, idle.criteria)) {
         list.forEach((r) => { r.enabled = false; });
         list.push(live);
+      } else if (idle && page.matchMode === 'and' && !(page.statuses || []).length && (page.days || 0) > 0) {
+        // Human: A saved "idle N days, any status" recipe must not become Idle 6d, which also requires Open.
+        // Agent: criteriaEqual ignores statusPattern, so this AND + empty-tag shape looked like the builtin. WRITES a custom rule.
+        list.forEach((r) => { r.enabled = false; });
+        list.push(live);
+      } else if (idle && page.color && asColor(page.color, idle.color) !== idle.color) {
+        idle.color = asColor(page.color, idle.color);
       }
     }
     return applyCanonicalFilterOrder(list, moduleId);

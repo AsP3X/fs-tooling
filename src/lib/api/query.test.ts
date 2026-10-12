@@ -14,17 +14,17 @@ describe('buildTicketFilterQuery', () => {
 
   it('OR combines status and idle', () => {
     const q = buildTicketFilterQuery(defaultPage({ days: 6, matchMode: 'or', statuses: ['Open'] }), names, now);
-    expect(q).toBe("status:2 OR updated_at:<'2026-08-29'");
+    expect(q).toBe("status:2 OR updated_at:<'2026-08-30'");
   });
 
   it('AND requires idle and any selected status', () => {
     const q = buildTicketFilterQuery(defaultPage({ days: 6, matchMode: 'and', statuses: ['Open', 'Pending'] }), names, now);
-    expect(q).toBe("(status:2 OR status:3) AND updated_at:<'2026-08-29'");
+    expect(q).toBe("(status:2 OR status:3) AND updated_at:<'2026-08-30'");
   });
 
   it('drops unknown status names', () => {
     const q = buildTicketFilterQuery(defaultPage({ days: 6, matchMode: 'or', statuses: ['Nope'] }), names, now);
-    expect(q).toBe("updated_at:<'2026-08-29'");
+    expect(q).toBe("updated_at:<'2026-08-30'");
   });
 
   it('ORs each enabled filter query', () => {
@@ -35,7 +35,7 @@ describe('buildTicketFilterQuery', () => {
       ],
     });
     const q = buildTicketFilterQuery(cfg, names, now);
-    expect(q).toBe("(updated_at:<'2026-08-29') OR (status:3)");
+    expect(q).toBe("(updated_at:<'2026-08-30') OR (status:3)");
   });
 
   it('adds created, due, priority, and unassigned clauses', () => {
@@ -47,7 +47,7 @@ describe('buildTicketFilterQuery', () => {
       names,
       now,
     );
-    expect(q).toContain("created_at:<'2026-08-21'");
+    expect(q).toContain("created_at:<'2026-08-22'");
     expect(q).toContain("due_by:<'2026-09-04'");
     expect(q).toContain('priority:3 OR priority:4');
     expect(q).toContain('agent_id:null');
@@ -71,7 +71,7 @@ describe('buildTicketFilterQuery', () => {
       now,
     );
     expect(swapped).toBe(ordered);
-    expect(swapped).toContain("updated_at:<'2026-08-29'");
+    expect(swapped).toContain("updated_at:<'2026-08-30'");
     expect(swapped).toContain("updated_at:>'2026-08-21'");
   });
 
@@ -135,7 +135,7 @@ describe('buildTicketFilterQuery', () => {
       names,
       now,
     );
-    expect(q).toBe("status:2 OR updated_at:<'2026-08-29'");
+    expect(q).toBe("status:2 OR updated_at:<'2026-08-30'");
   });
 });
 

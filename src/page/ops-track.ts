@@ -23,9 +23,11 @@ async function sampleTicket(id: number, doc: Document, force: boolean): Promise<
     } catch { /* ignore */ }
   }
   const row = getTicketOps(id);
-  const wantLog = force || !row || Object.keys(row.statusMs).length === 0;
   try {
     const sample = await fetchTicketSample(id);
+    const statusChanged = !!(sample?.status && row && sample.status.toLowerCase() !== row.status.toLowerCase());
+    // Human: The activity log is fetched again when the status changed, not only on the first visit.
+    const wantLog = force || !row || Object.keys(row?.statusMs || {}).length === 0 || statusChanged;
     const log = wantLog ? await fetchTicketStatusLog(id) : [];
     if (sample) {
       applySample(id, log.length ? { ...sample, statusLog: log } : sample);

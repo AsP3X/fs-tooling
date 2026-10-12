@@ -17,10 +17,9 @@ describe('ageDays / daysUntil', () => {
 });
 
 describe('civilDate', () => {
-  it('clamps overflow days to the last day of the month', () => {
-    const d = civilDate(2026, 2, 31);
-    expect(d).not.toBeNull();
-    expect(dateKey(d)).toBe('2026-02-28');
+  it('rejects a day that does not exist in that month', () => {
+    expect(civilDate(2026, 2, 31)).toBeNull();
+    expect(civilDate(2026, 2, 28)).not.toBeNull();
   });
 
   it('rejects invalid months', () => {
@@ -39,10 +38,22 @@ describe('parseTicketDate', () => {
     expect(d?.getHours()).toBe(10);
   });
 
-  it('parses German month abbreviations', () => {
+  it('parses German month abbreviations and full names', () => {
     const d = parseTicketDate('14 Okt, 2026, 10:00');
     expect(d?.getMonth()).toBe(9);
     expect(d?.getDate()).toBe(14);
+    expect(parseTicketDate('12 Juni 2026')?.getMonth()).toBe(5);
+    expect(parseTicketDate('3 Juli 2026')?.getMonth()).toBe(6);
+  });
+
+  it('parses Swedish maj and mars', () => {
+    expect(parseTicketDate('12 maj 2026')?.getMonth()).toBe(4);
+    expect(parseTicketDate('2 mars 2026')?.getDate()).toBe(2);
+    expect(parseTicketDate('2 mars 2026')?.getMonth()).toBe(2);
+  });
+
+  it('rejects an impossible numeric day instead of rolling into the next month', () => {
+    expect(parseTicketDate('31-02-2026')).toBeNull();
   });
 
   it('parses day-first numeric dates', () => {

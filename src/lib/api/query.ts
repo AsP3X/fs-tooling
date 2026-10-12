@@ -92,7 +92,13 @@ function dateBand(field: 'updated_at' | 'created_at', minDays: number | null, ma
     hi = swap;
   }
   const parts: string[] = [];
-  if (lo != null) parts.push(`${field}:<'${idleCutoffDate(lo, now)}'`);
+  // Human: `:< 'YYYY-MM-DD'` is the start of that UTC day. Bump one day so the cutoff day's morning is still fetched.
+  // Agent: Client inBand drops rows that are not actually idle long enough. READS shiftDateKey. A wider query is safe; a narrower one hides matches.
+  if (lo != null) {
+    const cutoff = idleCutoffDate(lo, now);
+    const end = shiftDateKey(cutoff, 1) || cutoff;
+    parts.push(`${field}:<'${end}'`);
+  }
   if (hi != null) parts.push(`${field}:>'${idleCutoffDate(hi, now)}'`);
   return parts.join(' AND ');
 }
@@ -140,7 +146,9 @@ export function buildTicketFilterQuery(
     if (parts.length === 1) return parts[0];
     return parts.map((p) => `(${p})`).join(' OR ');
   }
-  const idle = `updated_at:<'${idleCutoffDate(cfg.days, now)}'`;
+  const cutoff = idleCutoffDate(cfg.days, now);
+  const idleEnd = shiftDateKey(cutoff, 1) || cutoff;
+  const idle = `updated_at:<'${idleEnd}'`;
   const statusPart = combinedStatusClause(cfg.statuses, null, nameToId);
   return combineIdleAndStatus(idle, statusPart, cfg.matchMode === 'and' ? 'and' : 'or');
 }

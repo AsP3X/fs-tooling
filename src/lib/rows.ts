@@ -16,6 +16,12 @@ export function cellText(row: Element, sel: string): string {
 }
 
 export function rowTitle(row: Element): string {
+  const link = row.querySelector(
+    'a.subject-cell, td[data-name="subject"] a[href], td[data-name="ticket_subject"] a[href]',
+  );
+  // Human: The live subject link keeps the full title, including "Start DD-MM-YYYY", on aria-label. The visible line is clamped before that date.
+  const aria = link?.getAttribute('aria-label') || '';
+  if (parseStartDate(aria)) return aria;
   const titled = row.querySelector(
     'td[data-name="subject"] [title], td[data-name="ticket_subject"] [title], a.subject-cell [title], a[href] [title]',
   );
@@ -23,14 +29,21 @@ export function rowTitle(row: Element): string {
   const text = cellText(row, 'td[data-name="subject"]') || cellText(row, 'a.subject-cell') || cellText(row, 'td[data-name="ticket_subject"]');
   if (parseStartDate(attr)) return attr;
   if (parseStartDate(text)) return text;
+  if (aria.length > text.length) return aria;
   return attr || text;
 }
 
 export function ticketHref(row: Element, origin: string = location.origin): string | null {
-  const a = row.querySelector('a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"]');
+  const a = row.querySelector(
+    'a.subject-cell[href], a[href*="/tickets/"], a[href*="/employee_onboarding/"], a[href*="/journeys/"]',
+  );
   if (!a) return null;
   try {
-    return new URL(a.getAttribute('href') || '', origin).href;
+    const url = new URL(a.getAttribute('href') || '', origin);
+    const base = new URL(origin);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.origin !== base.origin) return null;
+    return url.href;
   } catch {
     return null;
   }
@@ -48,16 +61,24 @@ export function rowStatus(row: Element): string {
   const cell = row.querySelector('td[data-name="status"], td[data-name="ticket_status"]');
   const fromCell = cleanStatus(cell?.getAttribute('title') || cell?.textContent);
   if (fromCell) return fromCell;
-  const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
+  const trigger = row.querySelector(
+    'td[data-name="status"] .status-list-trigger, td[data-name="ticket_status"] .status-list-trigger, .status-list-trigger',
+  );
   const aged = parseStatusAgeLabel(trigger?.getAttribute('aria-label') || '');
   if (aged?.status) return cleanStatus(aged.status);
   return '';
 }
 
 export function rowStatusAge(row: Element): number | null {
-  const trigger = row.querySelector('.status-list-trigger, [data-ebd-id$="-trigger"]');
-  const aged = parseStatusAgeLabel(trigger?.getAttribute('aria-label') || '');
-  return aged ? aged.days : null;
+  // Human: Only the status control. Agent and priority dropdowns also use data-ebd-id and sit earlier after a column reorder.
+  const triggers = row.querySelectorAll(
+    'td[data-name="status"] .status-list-trigger, td[data-name="ticket_status"] .status-list-trigger, .status-list-trigger',
+  );
+  for (let i = 0; i < triggers.length; i += 1) {
+    const aged = parseStatusAgeLabel(triggers[i].getAttribute('aria-label') || '');
+    if (aged) return aged.days;
+  }
+  return null;
 }
 
 export function rowProgress(row: Element): Progress {
@@ -234,6 +255,7 @@ export function collectRows(doc: Document = document, now: number = Date.now()):
       href,
       status: rowStatus(row) || '—',
       idleDays,
+      idleFromStatus: statusAge != null,
       created,
       updated,
       start,

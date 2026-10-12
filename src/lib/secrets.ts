@@ -11,6 +11,17 @@ export function hasExtensionRuntime(): boolean {
   }
 }
 
+// Human: After an extension reload, chrome.runtime throws. That is not the userscript build.
+// Agent: RETURNS true only when chrome exists but the extension context is dead. Userscripts have no chrome.
+export function extensionContextBroken(): boolean {
+  if (typeof chrome === 'undefined' || !chrome.runtime) return false;
+  try {
+    return typeof chrome.runtime.id !== 'string' || chrome.runtime.id.length === 0;
+  } catch {
+    return true;
+  }
+}
+
 export function maskApiKey(key: string): string {
   const k = key.trim();
   if (!k) return '';
@@ -32,6 +43,8 @@ export async function getApiKey(): Promise<string> {
       return '';
     }
   }
+  // Human: A dead extension context must not read a key out of the page.
+  if (extensionContextBroken()) return '';
   try {
     return sessionStorage.getItem(USERSCRIPT_KEY) || '';
   } catch {
@@ -45,6 +58,9 @@ export async function setApiKey(apiKey: string): Promise<void> {
     await send({ type: 'sth.secrets.set', apiKey: value });
     return;
   }
+  if (extensionContextBroken()) {
+    throw new Error('extension_context_invalidated');
+  }
   if (value) sessionStorage.setItem(USERSCRIPT_KEY, value);
   else sessionStorage.removeItem(USERSCRIPT_KEY);
 }
@@ -53,6 +69,9 @@ export async function clearApiKey(): Promise<void> {
   if (hasExtensionRuntime()) {
     await send({ type: 'sth.secrets.clear' });
     return;
+  }
+  if (extensionContextBroken()) {
+    throw new Error('extension_context_invalidated');
   }
   sessionStorage.removeItem(USERSCRIPT_KEY);
 }

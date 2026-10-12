@@ -10,15 +10,19 @@ import { employeeKind } from '../text';
 import { priorityLabel } from '../ticket-fields';
 import type { PageSettings, Reportable, RowItem } from '../types';
 import { journeyHrefFor, parseRecordRef, ticketHrefFor } from './ids';
-import { fetchJourney, fetchJourneyList, fetchOnboardingChildren, journeyToReportable, progressFromChildTickets, startFromCustomFields, type ApiJourney } from './journeys';
-import { buildUpdatedRangeQuery } from './query';
-import { fetchTicket, fetchTicketsByIds, filterTickets, filterTicketsQuery, getStatusMaps, idleFromUpdated, parseIso, statusLabel, ticketEscalated, ticketToReportable, ticketUnassigned, type ApiTicket, type StatusMaps } from './tickets';
+import { fetchJourney, fetchJourneyList, fetchOnboarding, fetchOnboardingChildren, journeyToReportable, progressFromChildTickets, startFromCustomFields, type ApiJourney } from './journeys';
+import { buildTicketFilterQuery, buildUpdatedRangeQuery } from './query';
+import { fetchTicket, fetchTicketsByIds, filterTicketsQuery, getStatusMaps, idleFromUpdated, parseIso, statusLabel, ticketEscalated, ticketToReportable, ticketUnassigned, type ApiTicket, type StatusMaps } from './tickets';
 
 const TTL = 30_000;
 const ticketCache = new Map<number, { at: number; ticket: ApiTicket }>();
 const journeyCache = new Map<number, { at: number; journey: ApiJourney; progressPct: number | null }>();
 let filterCache: { key: string; at: number; tickets: ApiTicket[] } | null = null;
 let journeyListCache: { at: number; rows: ApiJourney[] } | null = null;
+/** Bumped when a newer enrich or range load starts, so a slow response cannot refresh the cache. */
+let enrichGen = 0;
+let rangeGen = 0;
+let journeyListGen = 0;
 
 export interface EnrichResult {
   items: RowItem[];
@@ -60,7 +64,6 @@ function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now:
     updated,
     created,
     status: statusLabel(ticket.status, maps) || item.status,
-    idleDays: idleFromUpdated(updated, created, now) ?? item.idleDays,
     updatedKey: dateKey(updated) || item.updatedKey,
     recordId: ticket.id,
     fromApi: true,
@@ -70,6 +73,8 @@ function mergeTicketRow(item: RowItem, ticket: ApiTicket, maps: StatusMaps, now:
     priority,
     unassigned,
     escalated,
+    // Human: "Open since N days" is time in status. updated_at moves when someone adds a note.
+    idleDays: item.idleFromStatus && item.idleDays != null ? item.idleDays : (idleFromUpdated(updated, created, now) ?? item.idleDays),
     initiator: ticket.requesterName || item.initiator,
     priorityText: item.priorityText || (priority != null ? priorityLabel(priority) : null),
     agentText: item.agentText || (unassigned === true ? 'Unassigned' : null),
@@ -108,7 +113,12 @@ function mergeJourneyRow(item: RowItem, journey: ApiJourney, progressPct: number
   };
 }
 
-async function enrichTickets(items: RowItem[], force: boolean, now: number): Promise<{ items: RowItem[]; maps: StatusMaps; used: boolean }> {
+async function enrichTickets(
+  items: RowItem[],
+  force: boolean,
+  now: number,
+  current: () => boolean,
+): Promise<{ items: RowItem[]; maps: StatusMaps; used: boolean }> {
   const maps = await getStatusMaps(force);
   const ids = items.map((i) => parseRecordRef(i.href)).filter((r): r is { kind: 'ticket'; id: number } => r?.kind === 'ticket').map((r) => r.id);
   const missing = ids.filter((id) => {
@@ -117,11 +127,11 @@ async function enrichTickets(items: RowItem[], force: boolean, now: number): Pro
   });
   if (missing.length) {
     const fetched = await fetchTicketsByIds(missing);
-    fetched.forEach((ticket, id) => ticketCache.set(id, { at: Date.now(), ticket }));
-    const still = missing.filter((id) => !ticketCache.has(id));
+    if (current()) fetched.forEach((ticket, id) => ticketCache.set(id, { at: Date.now(), ticket }));
+    const still = current() ? missing.filter((id) => !ticketCache.has(id)) : [];
     await pool(still, 4, async (id) => {
       const ticket = await fetchTicket(id);
-      if (ticket) ticketCache.set(id, { at: Date.now(), ticket });
+      if (ticket && current()) ticketCache.set(id, { at: Date.now(), ticket });
     });
   }
   const next = items.map((item) => {
@@ -133,18 +143,27 @@ async function enrichTickets(items: RowItem[], force: boolean, now: number): Pro
   return { items: next, maps, used: ids.some((id) => ticketCache.has(id)) };
 }
 
-async function enrichJourneys(items: RowItem[], force: boolean, now: number): Promise<{ items: RowItem[]; used: boolean }> {
-  const refs = items.map((i) => parseRecordRef(i.href)).filter((r): r is { kind: 'journey'; id: number } => r?.kind === 'journey');
-  const missing = refs.filter((r) => {
-    const hit = journeyCache.get(r.id);
+async function enrichJourneys(
+  items: RowItem[],
+  force: boolean,
+  now: number,
+  current: () => boolean,
+): Promise<{ items: RowItem[]; used: boolean }> {
+  const refs = items.map((item) => ({ item, ref: parseRecordRef(item.href) }))
+    .filter((row): row is { item: RowItem; ref: { kind: 'journey'; id: number } } => row.ref?.kind === 'journey');
+  const missing = refs.filter((row) => {
+    const hit = journeyCache.get(row.ref.id);
     return !hit || !cacheOk(hit.at, force);
   });
-  await pool(missing, 4, async (ref) => {
-    const journey = await fetchJourney(ref.id);
-    if (!journey) return;
-    const children = await fetchOnboardingChildren(ref.id);
-    const progress = progressFromChildTickets(children);
-    journeyCache.set(ref.id, { at: Date.now(), journey, progressPct: progress.pct });
+  await pool(missing, 4, async ({ item, ref }) => {
+    // Human: /employee_onboarding/{id} and /journeys/requests/{id} are different resources. Child tickets exist on the onboarding id.
+    const onboarding = /\/employee_onboarding\//i.test(item.href || '');
+    const journey = onboarding ? await fetchOnboarding(ref.id) : await fetchJourney(ref.id);
+    if (!journey || !current()) return;
+    const progressPct = onboarding
+      ? progressFromChildTickets(await fetchOnboardingChildren(ref.id)).pct
+      : null;
+    if (current()) journeyCache.set(ref.id, { at: Date.now(), journey, progressPct });
   });
   const next = items.map((item) => {
     const ref = parseRecordRef(item.href);
@@ -152,7 +171,19 @@ async function enrichJourneys(items: RowItem[], force: boolean, now: number): Pr
     const hit = journeyCache.get(ref.id);
     return hit ? mergeJourneyRow(item, hit.journey, hit.progressPct, now) : item;
   });
-  return { items: next, used: refs.some((r) => journeyCache.has(r.id)) };
+  return { items: next, used: refs.some((row) => journeyCache.has(row.ref.id)) };
+}
+
+async function loadJourneyRows(force: boolean): Promise<{ rows: ApiJourney[]; ok: boolean; partial: boolean }> {
+  if (journeyListCache && cacheOk(journeyListCache.at, force)) {
+    return { rows: journeyListCache.rows, ok: true, partial: false };
+  }
+  const gen = ++journeyListGen;
+  const listed = await fetchJourneyList(5);
+  if (gen === journeyListGen && listed.ok && !listed.partial) {
+    journeyListCache = { at: Date.now(), rows: listed.rows };
+  }
+  return listed;
 }
 
 async function offPageTickets(
@@ -162,17 +193,21 @@ async function offPageTickets(
   origin: string,
   sampleHref: string | null,
   force: boolean,
+  current: () => boolean = () => true,
 ): Promise<{ urls: string[]; records: Reportable[]; truncated: boolean }> {
   const key = JSON.stringify({
     d: cfg.days, s: cfg.statuses, m: cfg.matchMode,
     f: (cfg.filters || []).map((r) => [r.id, r.enabled, r.matchMode, r.invert, r.criteria]),
   });
   let tickets: ApiTicket[];
+  let partial = false;
   if (filterCache && filterCache.key === key && cacheOk(filterCache.at, force)) {
     tickets = filterCache.tickets;
   } else {
-    tickets = await filterTickets(cfg, maps, 5);
-    filterCache = { key, at: Date.now(), tickets };
+    const listed = await filterTicketsQuery(buildTicketFilterQuery(cfg, maps.byName), 5);
+    tickets = listed.ok ? listed.tickets : [];
+    partial = listed.partial;
+    if (listed.ok && !listed.partial && current()) filterCache = { key, at: Date.now(), tickets };
   }
   const extra = tickets.filter((t) => !visibleIds.has(t.id));
   const now = Date.now();
@@ -182,7 +217,7 @@ async function offPageTickets(
   return {
     urls: records.map((r) => r.href).filter((href): href is string => !!href),
     records,
-    truncated: tickets.length >= 500,
+    truncated: partial || tickets.length >= 500,
   };
 }
 
@@ -194,14 +229,8 @@ async function offPageJourneys(
   force: boolean,
   now: number,
 ): Promise<{ urls: string[]; records: Reportable[]; truncated: boolean }> {
-  let rows: ApiJourney[];
-  if (journeyListCache && cacheOk(journeyListCache.at, force)) {
-    rows = journeyListCache.rows;
-  } else {
-    const listed = await fetchJourneyList(5);
-    rows = listed.rows;
-    if (listed.ok) journeyListCache = { at: Date.now(), rows };
-  }
+  const listed = await loadJourneyRows(force);
+  const rows = listed.rows;
   const matched = rows.flatMap((j) => {
     if (visibleIds.has(j.id) || (j.display_id != null && visibleIds.has(j.display_id))) return [];
     const url = journeyHrefFor(origin, j.display_id || j.id, sampleHref);
@@ -211,22 +240,27 @@ async function offPageJourneys(
   return {
     urls: matched.map((m) => m.url),
     records: matched.map((m) => m.rec),
-    truncated: rows.length >= 500,
+    truncated: listed.partial || rows.length >= 500,
   };
 }
 
 export async function enrichList(items: RowItem[], force = false): Promise<EnrichResult> {
+  const gen = ++enrichGen;
+  const current = (): boolean => gen === enrichGen;
   const now = Date.now();
   const origin = location.origin;
   const sample = items.find((i) => i.href)?.href || null;
   const moduleId = getModuleId();
   const cfg = page();
   const visibleIds = new Set(items.map((i) => parseRecordRef(i.href)?.id).filter((id): id is number => id != null));
+  const stale = { items, extraUrls: [] as string[], extraMarked: 0, reportables: items, fromApi: false, truncated: false };
 
   try {
     if (moduleId === 'journeys') {
-      const { items: next, used } = await enrichJourneys(items, force, now);
+      const { items: next, used } = await enrichJourneys(items, force, now, current);
+      if (!current()) return stale;
       const off = used ? await offPageJourneys(cfg, visibleIds, origin, sample, force, now) : { urls: [], records: [], truncated: false };
+      if (!current()) return stale;
       return {
         items: next,
         extraUrls: off.urls,
@@ -236,8 +270,10 @@ export async function enrichList(items: RowItem[], force = false): Promise<Enric
         truncated: off.truncated,
       };
     }
-    const { items: next, maps, used } = await enrichTickets(items, force, now);
-    const off = used ? await offPageTickets(cfg, maps, visibleIds, origin, sample, force) : { urls: [], records: [], truncated: false };
+    const { items: next, maps, used } = await enrichTickets(items, force, now, current);
+    if (!current()) return stale;
+    const off = used ? await offPageTickets(cfg, maps, visibleIds, origin, sample, force, current) : { urls: [], records: [], truncated: false };
+    if (!current()) return stale;
     return {
       items: next,
       extraUrls: off.urls,
@@ -287,6 +323,7 @@ function visibleRangeRows(items: RowItem[], mode: 'start' | 'updated', from: str
 // Human: Date-range overlay rows. Independent of idle/status highlighting. Cap 5×100.
 // Agent: CALLS tickets/filter or journeys list when a key is saved. No key → empty (control is disabled in the panel).
 export async function listRangeResults(visible: RowItem[], force = false): Promise<RangeListResult> {
+  const gen = ++rangeGen;
   const cfg = page();
   const from = cfg.startFrom;
   const to = cfg.startTo;
@@ -312,17 +349,9 @@ export async function listRangeResults(visible: RowItem[], force = false): Promi
   try {
     let result: RangeListResult;
     if (moduleId === 'journeys') {
-      let rows: ApiJourney[];
-      let ok = false;
-      if (journeyListCache && cacheOk(journeyListCache.at, force)) {
-        rows = journeyListCache.rows;
-        ok = true;
-      } else {
-        const listed = await fetchJourneyList(5);
-        rows = listed.rows;
-        ok = listed.ok;
-        if (ok) journeyListCache = { at: Date.now(), rows };
-      }
+      const listed = await loadJourneyRows(force);
+      const rows = listed.rows;
+      const ok = listed.ok;
       if (!ok) return fallback;
       const fromApi = rows.map((j) => {
         const href = journeyHrefFor(origin, j.display_id || j.id, sample);
@@ -331,21 +360,22 @@ export async function listRangeResults(visible: RowItem[], force = false): Promi
       result = {
         rows: dedupeByHref([...selectRangeRows(fromApi, mode, from, to), ...fallback.rows]),
         fromApi: true,
-        truncated: rows.length >= 500,
+        truncated: listed.partial || rows.length >= 500,
       };
     } else {
       const maps = await getStatusMaps(force);
       const query = buildUpdatedRangeQuery(from, to);
-      const { tickets, ok } = await filterTicketsQuery(query, 5);
+      const { tickets, ok, partial } = await filterTicketsQuery(query, 5);
       if (!ok) return fallback;
       const fromApi = tickets.map((t) => ticketToReportable(t, maps, now, ticketHrefFor(origin, t.id, sample)));
       result = {
         rows: dedupeByHref([...selectRangeRows(fromApi, mode, from, to), ...fallback.rows]),
         fromApi: true,
-        truncated: tickets.length >= 500,
+        truncated: partial || tickets.length >= 500,
       };
     }
-    rangeCache = { key: cacheKey, at: Date.now(), result };
+    // Human: A newer range load owns the cache. This call still returns the rows it fetched.
+    if (gen === rangeGen) rangeCache = { key: cacheKey, at: Date.now(), result };
     return result;
   } catch {
     return fallback;

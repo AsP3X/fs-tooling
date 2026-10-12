@@ -105,8 +105,9 @@ export function emphasisCell(row: Element, passing: readonly string[], idleCell:
 // Human: Where a row's idle days came from. Without API data, "Open since N days" on the status control wins
 // over the Updated date (collectRows), so an idle rule is explained by the Status cell in that case.
 // Agent: READS the status trigger aria-label via rowStatusAge. RETURNS the element to outline for idleDays.
-export function idleExplainingCell(row: Element, fromApi: boolean, dateCell: Element | null): Element | null {
-  if (!fromApi && rowStatusAge(row) != null) {
+export function idleExplainingCell(row: Element, _fromApi: boolean, dateCell: Element | null): Element | null {
+  // Human: Status age stays the idle value even after an API enrich, so the outline stays on Status.
+  if (rowStatusAge(row) != null) {
     const status = columnCell(row, 'status');
     if (status) return innerTarget(status);
   }

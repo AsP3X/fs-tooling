@@ -69,14 +69,16 @@ export function parseDeskOrigin(raw: string): { origin: string; builtin: boolean
   }
 }
 
-/** SaaS hosts, or a path that still looks like the Freshservice Ember app. */
+/** SaaS hosts, or a custom desk whose path is the Freshservice Ember app (/a). */
+// Human: /support/ and /helpdesk exist on many unrelated sites. Those must not become desks from a toolbar click.
+// Agent: PURE. Default SaaS hosts match any path. Other hosts match only /a and /a/*.
 export function looksLikeFreshserviceUrl(url: string): boolean {
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return false;
     if (isDefaultAddonHost(u.hostname)) return true;
     const path = u.pathname || '/';
-    return path === '/a' || path.startsWith('/a/') || path.startsWith('/helpdesk') || path.startsWith('/support/');
+    return path === '/a' || path.startsWith('/a/');
   } catch {
     return false;
   }

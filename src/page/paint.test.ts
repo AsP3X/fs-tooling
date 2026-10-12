@@ -304,12 +304,12 @@ describe('applyVisualOrder', () => {
     expect(h1.hasAttribute('data-sth-z')).toBe(false);
   });
 
-  it('leaves a sorted tbody alone when the item set does not cover every row', () => {
+  it('clears shifts when the item set does not cover every row', () => {
     const { rows } = setup();
     setPage({ sortKey: 'status', sortDir: 'desc' });
     applyVisualOrder(collectRows(document), document);
     applyVisualOrder(collectRows(document).slice(1), document);
-    expect(rows[0].style.top).toBe('80px');
+    expect(rows.every((r) => r.style.top === '')).toBe(true);
   });
 
   it('still clears for Default when a row is skipped', () => {

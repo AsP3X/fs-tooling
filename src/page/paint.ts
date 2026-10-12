@@ -208,7 +208,7 @@ function queueReflow(): void {
   const run = (): void => {
     reflowQueued = false;
     if (disposed) return;
-    applyVisualOrder(lastOrderItems.filter((item) => item.row.isConnected));
+    applyVisualOrder(lastOrderItems.filter((item) => item.row.isConnected && rowKey(item.row) === (item.href || '')));
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
   else setTimeout(run, 16);
@@ -284,9 +284,8 @@ export function visualSortActive(): boolean {
 
 // Human: Sort the visible page by offsetting rows instead of moving them.
 // Agent: READS offsetTop/offsetHeight (layout). WRITES position/top + data-sth-shift. Re-runs on row resize.
-// Clears all shifts in a tbody when: sort is Default, the sort is paused, occlusion is on, or the rows are not
-// a plain laid-out stack. Leaves a sorted tbody alone when the item set does not cover every row (a recycled
-// row was skipped; the observers already snapped it back and a repaint is queued).
+// Clears all shifts in a tbody when: sort is Default, the sort is paused, occlusion is on, the rows are not
+// a plain laid-out stack, or the item set does not cover every row (a recycled row must not keep the old offset).
 export function applyVisualOrder(items: RowItem[], doc: Document = document): void {
   if (disposed) return;
   lastOrderItems = items;
@@ -317,7 +316,11 @@ export function applyVisualOrder(items: RowItem[], doc: Document = document): vo
     }
     const index = new Map(natural.map((row, i) => [row, i] as const));
     const covers = list.length === natural.length && list.every((item) => index.has(item.row));
-    if (!covers) return;
+    // Human: A missing row means the offsets were measured for a different set. Snap back instead of keeping the previous ticket's slot.
+    if (!covers) {
+      clearAll();
+      return;
+    }
     const order = [...list].sort((a, b) => compareItems(a, b, key, dir)).map((item) => index.get(item.row) as number);
     if (isNaturalOrder(order)) {
       clearAll();
@@ -389,6 +392,10 @@ export function dropShiftsOnStructureChange(records: MutationRecord[]): void {
       return;
     }
     if (m.type === 'attributes' && m.attributeName === 'href' && m.target instanceof Element) {
+      const link = m.target.closest('a');
+      const href = link?.getAttribute('href') || m.target.getAttribute('href') || '';
+      const subject = !!link?.classList.contains('subject-cell') || /\/(?:tickets|employee_onboarding|journeys)\//i.test(href);
+      if (!subject) return;
       const body = m.target.closest('tbody tr.et-tr')?.parentElement;
       if (body) bodies.add(body);
     }

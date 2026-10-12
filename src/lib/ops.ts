@@ -213,6 +213,10 @@ function isClosedLabel(status: string): boolean {
   return /^(resolved|closed)$/i.test(status.trim());
 }
 
+function isOpenLabel(status: string): boolean {
+  return /^(open|pending|waiting|on hold|in progress)$/i.test(status.trim());
+}
+
 /**
  * Merge a desk sample (API or DOM). Assignment bounce uses selfId vs responderId in memory only.
  * Agent: WRITES status/times/assignedToSelf/returnedCount. DROPS responderId.
@@ -253,13 +257,15 @@ export function applySample(
     row.statusSince = now;
   }
 
-  if (nextStatus && !isClosedLabel(nextStatus)) {
+  // Human: German and renamed closed statuses are not the words "resolved" or "closed". Do not wipe API timestamps for those.
+  // Agent: WRITES resolvedAt/closedAt from the sample first. Clears them only for a known open label.
+  if (sample.resolvedAt) row.resolvedAt = sample.resolvedAt;
+  if (sample.closedAt) row.closedAt = sample.closedAt;
+  if (nextStatus && isClosedLabel(nextStatus)) {
+    if (!row.resolvedAt) row.resolvedAt = now;
+  } else if (nextStatus && isOpenLabel(nextStatus)) {
     row.resolvedAt = null;
     row.closedAt = null;
-  } else {
-    if (sample.resolvedAt) row.resolvedAt = sample.resolvedAt;
-    if (sample.closedAt) row.closedAt = sample.closedAt;
-    if (!row.resolvedAt && nextStatus && isClosedLabel(nextStatus)) row.resolvedAt = now;
   }
 
   const selfId = ledger.selfId;
@@ -310,6 +316,11 @@ function dayKey(ts: number): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+function startOfLocalDay(ts: number): Date {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
 export function buildOpsOverview(ledger: OpsLedger, now = Date.now()): OpsOverview {
   const rows = Object.values(ledger.tickets);
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -334,9 +345,11 @@ export function buildOpsOverview(ledger: OpsLedger, now = Date.now()): OpsOvervi
     }
   });
   const days: number[] = [];
+  const today = startOfLocalDay(now);
   for (let i = 13; i >= 0; i -= 1) {
-    const t = now - i * 24 * 60 * 60 * 1000;
-    const key = dayKey(t);
+    const day = new Date(today);
+    day.setDate(today.getDate() - i);
+    const key = dayKey(day.getTime());
     days.push(stamps.filter((stamp) => dayKey(stamp) === key).length);
   }
   const statusDwell = [...dwell.entries()]

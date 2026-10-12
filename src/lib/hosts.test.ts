@@ -29,6 +29,8 @@ describe('looksLikeFreshserviceUrl', () => {
   it('rejects unrelated https pages', () => {
     expect(looksLikeFreshserviceUrl('https://mail.google.com/')).toBe(false);
     expect(looksLikeFreshserviceUrl('http://acme.freshservice.com/a/tickets')).toBe(false);
+    expect(looksLikeFreshserviceUrl('https://help.example.com/support/home')).toBe(false);
+    expect(looksLikeFreshserviceUrl('https://help.example.com/helpdesk')).toBe(false);
   });
 });
 

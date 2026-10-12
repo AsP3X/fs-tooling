@@ -98,6 +98,9 @@ export async function getStatusMaps(force = false): Promise<StatusMaps> {
       maps.byName.set(label.toLowerCase(), id);
     });
   });
+  // Human: A 401 or network miss must not freeze the English defaults for 10 minutes.
+  // Agent: WRITES statusCache only after HTTP 2xx. RETURNS the defaults uncached on failure.
+  if (!res.ok) return maps;
   statusCache = { at: Date.now(), maps };
   return maps;
 }
@@ -186,12 +189,36 @@ export async function fetchTicketSample(id: number): Promise<TicketSample | null
   return ticketSampleFromJson(root.ticket || root, maps);
 }
 
-// Human: Status transitions from the activities feed. Raw sentences are parsed and discarded.
-// Agent: CALLS GET /api/v2/tickets/{id}/activities. RETURNS { at, status } only.
+// Human: Next activities page, only when it stays on /api/v2. Absolute URLs are reduced to path + query.
+// Agent: PURE. RETURNS '' when the link is missing or not an API path.
+function activitiesPath(next: unknown): string {
+  if (typeof next !== 'string' || !next.trim()) return '';
+  try {
+    if (next.startsWith('/')) return next.startsWith('/api/v2/') ? next : '';
+    const url = new URL(next);
+    if (!url.pathname.startsWith('/api/v2/')) return '';
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return '';
+  }
+}
+
+// Human: Status transitions from the activities feed. Follows up to two further pages so the oldest change is not missing.
+// Agent: CALLS GET /api/v2/tickets/{id}/activities. RETURNS { at, status } only. Stops on a non-2xx page.
 export async function fetchTicketStatusLog(id: number): Promise<NonNullable<TicketSample['statusLog']>> {
-  const res = await apiRequest(`/api/v2/tickets/${id}/activities`);
-  if (!res.ok) return [];
-  return parseStatusActivities(res.json);
+  const events: NonNullable<TicketSample['statusLog']> = [];
+  let path = `/api/v2/tickets/${id}/activities`;
+  const seen = new Set<string>();
+  for (let page = 0; page < 3 && path; page += 1) {
+    if (seen.has(path)) break;
+    seen.add(path);
+    const res = await apiRequest(path);
+    if (!res.ok) break;
+    events.push(...parseStatusActivities(res.json));
+    const root = asRecord(res.json);
+    path = activitiesPath(root.next_page_url || asRecord(root.meta).next_page);
+  }
+  return events;
 }
 
 export async function fetchTicketsByIds(ids: number[]): Promise<Map<number, ApiTicket>> {
@@ -211,23 +238,30 @@ export async function fetchTicketsByIds(ids: number[]): Promise<Map<number, ApiT
 
 // Human: Page a /tickets/filter query. ok is false when the first page fails (no key, 401, bad query).
 // Agent: READS /api/v2/tickets/filter. Caps at maxPages × 100.
-export async function filterTicketsQuery(query: string, maxPages = 5): Promise<{ tickets: ApiTicket[]; ok: boolean }> {
-  if (!query.trim()) return { tickets: [], ok: false };
+export async function filterTicketsQuery(
+  query: string,
+  maxPages = 5,
+): Promise<{ tickets: ApiTicket[]; ok: boolean; partial: boolean }> {
+  if (!query.trim()) return { tickets: [], ok: false, partial: false };
   const encoded = encodeURIComponent(`"${query}"`);
   const out: ApiTicket[] = [];
   let ok = false;
+  let partial = false;
   for (let page = 1; page <= maxPages; page += 1) {
     const res = await apiRequest(`/api/v2/tickets/filter?query=${encoded}&page=${page}&per_page=100`);
     if (!res.ok) {
-      if (page === 1) return { tickets: [], ok: false };
+      // Human: Page 1 down means there is no list. A later 429 still returns what we have, marked partial.
+      if (page === 1) return { tickets: [], ok: false, partial: false };
+      partial = true;
       break;
     }
     ok = true;
     const batch = asArray(asRecord(res.json).tickets).map(asApiTicket).filter((t): t is ApiTicket => !!t);
     out.push(...batch);
     if (batch.length < 100) break;
+    if (page === maxPages) partial = true;
   }
-  return { tickets: out, ok };
+  return { tickets: out, ok, partial };
 }
 
 export async function filterTickets(cfg: PageSettings, maps: StatusMaps, maxPages = 5): Promise<ApiTicket[]> {

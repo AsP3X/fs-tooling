@@ -15,6 +15,7 @@ document.getElementById(HOST_ID)?.remove();
 document.getElementById(STYLE_ID)?.remove();
 window.__staleTicketObserver?.disconnect();
 window.__sthAttrObserver?.disconnect();
+window.__sthPanelTeardown?.();
 window.__sthTeardown?.();
 
 const pageStyle = document.createElement('style');
@@ -51,6 +52,7 @@ const removeSelectionGuard = installSelectionGuard(window, visualSortActive, (me
 // Agent: Called by the next injected instance. Stops pending repaints and the paint module's observers so
 // two instances never write marks / offsets to the same table.
 window.__sthTeardown = () => {
+  window.__sthPanelTeardown?.();
   observers.stop();
   removeSelectionGuard();
   disposePaint();

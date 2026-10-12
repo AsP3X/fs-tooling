@@ -53,6 +53,17 @@ describe('loadSettings', () => {
     expect(s.journeys.filters.some((f) => f.id === 'idle-7' && f.enabled)).toBe(true);
   });
 
+  it('keeps an idle-any-status recipe instead of turning it into Open and idle', () => {
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      tickets: { days: 6, statuses: [], matchMode: 'and', color: '#00aa00', filters: [] },
+    }));
+    const s = loadSettings(storage);
+    const mine = s.tickets.filters.find((f) => f.id === 'migrated-live');
+    expect(mine?.enabled).toBe(true);
+    expect(mine?.criteria.idleDays).toBe(6);
+    expect(s.tickets.filters.find((f) => f.id === 'idle-6')?.enabled).toBe(false);
+  });
+
   it('merges nested page settings onto defaults', () => {
     storage.setItem(STORAGE_KEY, JSON.stringify({
       module: 'journeys',

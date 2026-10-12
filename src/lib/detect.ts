@@ -12,7 +12,7 @@ export function detectModule(
   const journeyHeader = doc.querySelector(
     'th[data-name="initiator"], th[data-name="child_ticket_progress"], td[data-name="child_ticket_progress"]',
   );
-  const path = `${loc.pathname} ${loc.href}`;
-  if (journeyHeader || /employee_onboarding|\/journeys|onboarding/i.test(path)) return 'journeys';
+  const path = loc.pathname || '';
+  if (journeyHeader || /\/employee_onboarding(?:\/|$)|\/journeys(?:\/|$)/i.test(path)) return 'journeys';
   return 'tickets';
 }

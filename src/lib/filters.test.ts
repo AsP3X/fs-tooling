@@ -390,6 +390,15 @@ describe('new criteria', () => {
   });
 
   it('start already passed and progress band', () => {
+    const soon = mergeFilterList(defaultPage(), 'journeys').find((r) => r.id === 'start-soon');
+    const low = mergeFilterList(defaultPage(), 'journeys').find((r) => r.id === 'low-prog');
+    expect(soon?.criteria.idleDays).toBeUndefined();
+    expect(ruleMatches(item({ idleDays: 10, startIn: 3 }), { ...soon!, enabled: true }, 'journeys')).toBe(true);
+    expect(ruleMatches(item({ idleDays: 10, startIn: 40 }), { ...soon!, enabled: true }, 'journeys')).toBe(false);
+    expect(ruleMatches(item({ idleDays: 10, startIn: -2 }), { ...soon!, enabled: true }, 'journeys')).toBe(false);
+    expect(low?.matchMode).toBe('and');
+    expect(ruleMatches(item({ idleDays: 8, progress: { pct: 90 } }), { ...low!, enabled: true }, 'journeys')).toBe(false);
+    expect(ruleMatches(item({ idleDays: 8, progress: { pct: 20 } }), { ...low!, enabled: true }, 'journeys')).toBe(true);
     const started = rule({ id: 's', name: 'S', criteria: { startPassed: true } });
     expect(ruleMatches(item({ startIn: -1 }), started, 'journeys')).toBe(true);
     expect(ruleMatches(item({ startIn: 0 }), started, 'journeys')).toBe(true);

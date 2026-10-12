@@ -55,7 +55,7 @@ describe('idleExplainingCell', () => {
     (document.getElementById('st') as HTMLElement).insertAdjacentHTML('beforeend', '<div class="status-list-trigger" aria-label="Open since 9 days"></div>');
     const date = document.getElementById('upd');
     expect(idleExplainingCell(tr, false, date)?.id).toBe('st');
-    expect(idleExplainingCell(tr, true, date)?.id).toBe('upd');
+    expect(idleExplainingCell(tr, true, date)?.id).toBe('st');
   });
 
   it('keeps the date cell when there is no status age', () => {

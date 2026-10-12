@@ -35,20 +35,27 @@ export function startListObservers(
     timer = setTimeout(onPaint, debounceMs);
   };
 
+  const inListRow = (record: MutationRecord): boolean => {
+    const el = record.target instanceof Element ? record.target : record.target.parentElement;
+    return !!el?.closest('tbody tr.et-tr');
+  };
+
   const childObserver = new MutationObserver((muts) => {
-    if (shouldIgnoreMutations(muts, host)) return;
-    settleRows(muts);
+    const relevant = muts.filter((record) => record.type !== 'characterData' || inListRow(record));
+    if (!relevant.length || shouldIgnoreMutations(relevant, host)) return;
+    settleRows(relevant);
     schedulePaint();
   });
-  childObserver.observe(root, { childList: true, subtree: true });
+  childObserver.observe(root, { childList: true, subtree: true, characterData: true });
 
   const attrObserver = new MutationObserver((muts) => {
     const recycled = rowHrefChanged(muts);
+    const text = muts.some((record) => (record.attributeName === 'aria-label' || record.attributeName === 'title') && inListRow(record));
     if (recycled || recordsTouchPaintedRows(muts)) settleRows(muts);
-    // Ember can recycle a row by only swapping attributes/text; no childList record would trigger a repaint.
-    if (recycled) schedulePaint();
+    // Ember can recycle a row by swapping the subject link, or edit a cell's text without adding a node.
+    if (recycled || text) schedulePaint();
   });
-  attrObserver.observe(root, { attributes: true, attributeFilter: ['class', 'style', 'href'], subtree: true });
+  attrObserver.observe(root, { attributes: true, attributeFilter: ['class', 'style', 'href', 'aria-label', 'title'], subtree: true });
 
   return {
     childObserver,

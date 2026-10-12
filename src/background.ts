@@ -37,7 +37,7 @@ function looksLikeFreshserviceUrl(url) {
     if (u.protocol !== 'https:') return false;
     if (isDefaultAddonHost(u.hostname)) return true;
     const path = u.pathname || '/';
-    return path === '/a' || path.startsWith('/a/') || path.startsWith('/helpdesk') || path.startsWith('/support/');
+    return path === '/a' || path.startsWith('/a/');
   } catch {
     return false;
   }
@@ -174,9 +174,15 @@ function allowedPath(path) {
   return path.startsWith('/api/v2/') && !path.includes('..');
 }
 
-async function handleApiFetch(message) {
+async function handleApiFetch(message, sender) {
   const origin = String(message.origin || '');
   const path = String(message.path || '');
+  const method = String(message.method || 'GET').toUpperCase();
+  // Human: Reads only, and only for the tab that asked. A content script cannot point the key at another origin.
+  if (method !== 'GET') return { ok: false, status: 0, json: null, error: 'forbidden' };
+  let senderOrigin = '';
+  try { senderOrigin = new URL(String(sender?.url || sender?.tab?.url || '')).origin; } catch { /* not a URL */ }
+  if (!senderOrigin || senderOrigin !== origin) return { ok: false, status: 0, json: null, error: 'forbidden' };
   if (!(await allowedOrigin(origin)) || !allowedPath(path)) {
     return { ok: false, status: 0, json: null, error: 'forbidden' };
   }
@@ -189,9 +195,8 @@ async function handleApiFetch(message) {
       'Content-Type': 'application/json',
     };
     const res = await fetch(`${origin}${path}`, {
-      method: message.method || 'GET',
+      method: 'GET',
       headers,
-      body: message.body || undefined,
     });
     let json = null;
     try { json = await res.json(); } catch { json = null; }
@@ -399,7 +404,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (type === 'sth.api.fetch') {
-    handleApiFetch(message).then(sendResponse);
+    handleApiFetch(message, _sender).then(sendResponse);
     return true;
   }
   if (type === 'sth.updates.check') {
@@ -575,9 +580,10 @@ chrome.action?.onClicked?.addListener(async (tab) => {
       try {
         const ok = await chrome.permissions.request({ origins: [pattern] });
         if (ok) {
+          const desk = parseDeskOrigin(parsed.origin);
           const desks = await readDesks();
-          if (!desks.includes(parsed.origin)) {
-            desks.push(parsed.origin);
+          if (desk && !desk.builtin && !desks.includes(desk.origin)) {
+            desks.push(desk.origin);
             await writeDesks(desks);
           } else {
             await syncCustomContentScripts();

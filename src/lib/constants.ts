@@ -23,9 +23,21 @@ export const OPS_SAMPLE_MS = 45 * 1000;
 /** Cap stored open timestamps per ticket (sparkline + openCount). */
 export const MAX_OPS_OPENS = 80;
 
+// Human: Month tokens from Freshservice cell titles. Keys are lowercase, with and without a trailing dot already stripped.
+// Agent: READ by parseTicketDate / parseStartInput. 3-letter forms and the full names that fail a 3-letter cut (Juni, Juli, mars, maj).
 export const MONTHS: Record<string, number> = {
-  jan: 0, feb: 1, mar: 2, mär: 2, mrz: 2, apr: 3, may: 4, mai: 4, jun: 5,
-  jul: 6, aug: 7, sep: 8, oct: 9, okt: 9, nov: 10, dec: 11, dez: 11,
+  jan: 0, januar: 0, january: 0,
+  feb: 1, februar: 1, february: 1,
+  mar: 2, mär: 2, märz: 2, mrz: 2, maerz: 2, mars: 2, march: 2,
+  apr: 3, april: 3,
+  may: 4, mai: 4, maj: 4,
+  jun: 5, juni: 5, june: 5, juin: 5,
+  jul: 6, juli: 6, july: 6,
+  aug: 7, august: 7, augusti: 7,
+  sep: 8, sept: 8, september: 8,
+  oct: 9, okt: 9, oktober: 9, october: 9,
+  nov: 10, november: 10,
+  dec: 11, dez: 11, dezember: 11, december: 11,
 };
 
 export const BUCKETS = [

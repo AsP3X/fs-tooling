@@ -3,14 +3,32 @@
 
 import { MONTHS, MS_DAY } from './constants';
 
+// Human: Calendar date in local time. 31 Feb is not a date — do not slide it onto 28 Feb.
+// Agent: PURE. RETURNS null when the day is outside that month. Callers must not clamp.
 export function civilDate(year: number, month1to12: number, day: number): Date | null {
   const y = Number(year);
   const m = Number(month1to12);
   const d = Number(day);
   if (!y || m < 1 || m > 12 || d < 1) return null;
   const last = new Date(y, m, 0).getDate();
-  const dt = new Date(y, m - 1, Math.min(d, last));
+  if (d > last) return null;
+  const dt = new Date(y, m - 1, d);
   return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+// Human: Resolve a Freshservice month token. Full names win over a 3-letter slice so "juni" is June and "juli" stays July.
+// Agent: READS MONTHS. RETURNS null for an unknown token. PURE.
+function monthIndex(token: string): number | null {
+  const key = token.toLowerCase().replace(/\./g, '');
+  const n = MONTHS[key];
+  return n == null ? null : n;
+}
+
+function dateWithTime(year: number, month1to12: number, day: number, hour: number, minute: number): Date | null {
+  const dt = civilDate(year, month1to12, day);
+  if (!dt) return null;
+  dt.setHours(hour, minute, 0, 0);
+  return dt;
 }
 
 export function dateKey(d: Date | null): string | null {
@@ -47,15 +65,15 @@ export function prettyStart(d: Date | null): string | null {
 export function parseTicketDate(raw: string | null | undefined): Date | null {
   if (!raw) return null;
   const str = String(raw).replace(/\s+/g, ' ').trim();
-  let m = str.match(/(\d{1,2})\s+(\p{L}{3})\.?,?\s+(\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/u);
-  if (m && MONTHS[m[2].toLowerCase()] != null) {
-    return new Date(+m[3], MONTHS[m[2].toLowerCase()], +m[1], +(m[4] || 0), +(m[5] || 0));
+  // Human: 3-letter abbreviations and full names (Juni, Juli, mars, September). A 3-letter cut turned Juni into an unknown token.
+  let m = str.match(/(\d{1,2})\s+(\p{L}{3,12})\.?,?\s+(\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/u);
+  const month = m ? monthIndex(m[2]) : null;
+  if (m && month != null) {
+    return dateWithTime(+m[3], month + 1, +m[1], +(m[4] || 0), +(m[5] || 0));
   }
   m = str.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
   if (m) {
-    const d = +m[1];
-    const mo = +m[2];
-    return new Date(+m[3], mo - 1, d, +(m[4] || 0), +(m[5] || 0));
+    return dateWithTime(+m[3], +m[2], +m[1], +(m[4] || 0), +(m[5] || 0));
   }
   const native = new Date(str.replace(/,/g, ''));
   return Number.isNaN(native.getTime()) ? null : native;
@@ -81,9 +99,10 @@ export function parseStartInput(raw: string | null | undefined): string | null {
   }
   m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) return dateKey(civilDate(+m[1], +m[2], +m[3]));
-  m = str.match(/^(\d{1,2})\s+(\p{L}{3})\.?\s+(\d{4})$/u);
-  if (m && MONTHS[m[2].toLowerCase()] != null) {
-    return dateKey(civilDate(+m[3], MONTHS[m[2].toLowerCase()] + 1, +m[1]));
+  m = str.match(/^(\d{1,2})\s+(\p{L}{3,12})\.?\s+(\d{4})$/u);
+  const month = m ? monthIndex(m[2]) : null;
+  if (m && month != null) {
+    return dateKey(civilDate(+m[3], month + 1, +m[1]));
   }
   return dateKey(parseStartDate('Start ' + str));
 }

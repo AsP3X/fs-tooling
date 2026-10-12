@@ -7,6 +7,22 @@ describe('statusFromActivity', () => {
     expect(statusFromActivity('Status has been changed from Open to Resolved')).toBe('Resolved');
   });
 
+  it('stops before a following assignment so a name is not stored', () => {
+    expect(statusFromActivity('set Status as Open and assigned to Jane Doe')).toBe('Open');
+    expect(statusFromActivity('set Status as Waiting on Customer and set Group as Service Desk')).toBe('Waiting on Customer');
+  });
+
+  it('reads a status buried in sub_contents', () => {
+    const events = parseStatusActivities({
+      activities: [{
+        created_at: '2026-09-03T00:00:00Z',
+        content: 'executed workflow',
+        sub_contents: ['set Status as Pending', 'Workflow Ends'],
+      }],
+    });
+    expect(events).toEqual([{ at: Date.parse('2026-09-03T00:00:00Z'), status: 'Pending' }]);
+  });
+
   it('drops lines that are not status changes', () => {
     expect(statusFromActivity('added a private note')).toBeNull();
     expect(statusFromActivity('assigned this ticket to someone')).toBeNull();
@@ -40,6 +56,18 @@ describe('dwellFromLog', () => {
     expect(built?.statusMs.Open).toBe(3600000);
     expect(built?.status).toBe('Pending');
     expect(built?.statusSince).toBe(t1);
+  });
+
+  it('does not charge the time before the first change to that new status', () => {
+    const created = Date.parse('2026-09-01T00:00:00Z');
+    const pendingAt = created + 10 * 86400000;
+    const resolvedAt = pendingAt + 2 * 86400000;
+    const built = dwellFromLog(
+      [{ at: pendingAt, status: 'Pending' }, { at: resolvedAt, status: 'Resolved' }],
+      created,
+    );
+    expect(built?.statusMs.Pending).toBe(2 * 86400000);
+    expect(built?.statusMs.Pending).not.toBe(12 * 86400000);
   });
 });
 

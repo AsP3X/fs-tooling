@@ -118,6 +118,30 @@ describe('collectRows', () => {
     expect(collectRows(document, NOW)[0].status).toBe('Open');
   });
 
+  it('reads a start date from the subject aria-label when the visible line is clamped', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr class="et-tr">
+        <td data-name="ticket_subject">
+          <a class="subject-cell" href="/a/tickets/8" aria-label="Onboarding Task: Install Laptop - Ada (Werkstudent) - Start 15-09-2026">Onboarding Task: Install Laptop - Ada</a>
+        </td>
+      </tr></tbody></table>`;
+    const [row] = collectRows(document, NOW);
+    expect(row.startKey).toBe('2026-09-15');
+    expect(row.subject).toContain('Start 15-09-2026');
+  });
+
+  it('ignores a status dropdown that only says Select, and does not read the agent dropdown', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr class="et-tr">
+        <td data-name="assigned_to"><div data-ebd-id="x-trigger" aria-label="Choose Group and Agent"></div></td>
+        <td data-name="status"><div class="status-list-trigger" aria-label="Select ticket status"></div></td>
+        <td data-name="updated_at_date"><span data-test-id="date-cell" title="01 Sep, 2026, 12:00">1 Sep</span></td>
+      </tr></tbody></table>`;
+    const [row] = collectRows(document, NOW);
+    expect(row.idleFromStatus).toBe(false);
+    expect(row.idleDays).toBeCloseTo(3, 5);
+  });
+
   it('reads German status-age labels', () => {
     document.body.innerHTML = `
       <table>

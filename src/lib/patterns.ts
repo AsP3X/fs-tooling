@@ -63,9 +63,14 @@ export interface CompiledPattern {
 }
 
 /** Compile a user or default pattern. Always `iu`. Invalid source → null (callers skip the dimension). */
+const MAX_PATTERN_LENGTH = 400;
+
+// Human: User patterns run on every visible row. Reject huge sources and nested quantifiers before they stall paint.
+// Agent: PURE. RETURNS null for empty, too long, nested +/*, or a source that does not compile. Never throws.
 export function compileUnicodeRegex(source: string | null | undefined): CompiledPattern | null {
   const trimmed = String(source || '').trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.length > MAX_PATTERN_LENGTH) return null;
+  if (/\([^)]*[+*][^)]*\)[+*{]/.test(trimmed)) return null;
   try {
     return { source: trimmed, regex: new RegExp(trimmed, 'iu') };
   } catch {
